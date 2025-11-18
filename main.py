@@ -12,25 +12,19 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger("wheelbot-lite")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBAPP_URL = os.getenv("WEBAPP_URL")  # e.g. https://your-app.up.railway.app
-TARGET_GROUP_ID = os.getenv("TARGET_GROUP_ID")  # e.g. -1001234567890 (optional)
+WEBAPP_URL = os.getenv("WEBAPP_URL")  # e.g. https://web-production-f91a3.up.railway.app
+TARGET_GROUP_ID = os.getenv("TARGET_GROUP_ID")  # e.g. -1003317283401
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set")
 if not WEBAPP_URL:
     raise RuntimeError("WEBAPP_URL is not set")
-
-if TARGET_GROUP_ID:
-    try:
-        TARGET_GROUP_ID = int(TARGET_GROUP_ID)
-    except ValueError:
-        log.warning("TARGET_GROUP_ID is not a valid int, using as string")
-else:
-    TARGET_GROUP_ID = None
+if not TARGET_GROUP_ID:
+    raise RuntimeError("TARGET_GROUP_ID is not set")
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# In-memory user states: chat_id -> dict
+# user state memory
 USER_STATES = {}
 
 
@@ -46,38 +40,31 @@ def send_message(chat_id, text, parse_mode=None):
         log.exception("Error sending message")
 
 
-def send_start_message(chat_id: int):
-    wheel_url = f"{WEBAPP_URL}/wheel"
+def send_start(chat_id: int):
+    wheel_url = f"{WEBAPP_URL}/wheel?v=4"   # force Telegram WebApp refresh
     text = (
         "🎰 សូមស្វាគមន៍មកកាន់កង់រង្វាន់!\n"
-        "ចុចប៊ូតុងខាងក្រោមដើម្បី Spin Wheel 🎯"
+        "ចុចប៊ូតុងខាងក្រោមដើម្បី SPIN 🎯"
     )
     reply_markup = {
         "inline_keyboard": [[
-            {
-                "text": "🎰 Open Spin Wheel",
-                "web_app": {"url": wheel_url},
-            }
+            {"text": "🎰 Open Spin Wheel", "web_app": {"url": wheel_url}}
         ]]
     }
     try:
         r = requests.post(
             f"{API_URL}/sendMessage",
-            json={
-                "chat_id": chat_id,
-                "text": text,
-                "reply_markup": reply_markup,
-            },
+            json={"chat_id": chat_id, "text": text, "reply_markup": reply_markup},
             timeout=10,
         )
         if not r.ok:
-            log.error("sendMessage failed: %s", r.text)
+            log.error("sendStart failed: %s", r.text)
     except Exception:
         log.exception("Error sending start message")
 
 
-def run_bot_polling():
-    log.info("🚀 Bot polling loop started (requests + long polling)")
+def polling_loop():
+    log.info("🚀 Bot polling started…")
     offset = None
     while True:
         try:
@@ -87,117 +74,85 @@ def run_bot_polling():
                 timeout=60,
             )
             if not r.ok:
-                log.error("getUpdates failed: %s", r.text)
-                time.sleep(5)
+                time.sleep(4)
                 continue
 
             data = r.json()
-            if not data.get("ok"):
-                log.error("getUpdates not ok: %s", data)
-                time.sleep(5)
-                continue
-
-            for update in data.get("result", []):
-                offset = update["update_id"] + 1
-
-                message = update.get("message")
-                if not message:
+            for upd in data.get("result", []):
+                offset = upd["update_id"] + 1
+                msg = upd.get("message")
+                if not msg:
                     continue
 
-                chat = message.get("chat") or {}
-                chat_id = chat.get("id")
-                if not chat_id:
-                    continue
+                chat_id = msg["chat"]["id"]
+                text = (msg.get("text") or "").strip()
+                username = msg["chat"].get("username")
 
-                text = (message.get("text") or "").strip()
-
-                # Check if this user is in a conversation flow
+                # state machine
                 state = USER_STATES.get(chat_id)
-                if state and text:
+
+                if state:
                     stage = state.get("stage")
 
-                    # 1) Waiting for full name
-                    if stage == "waiting_name":
+                    # waiting full name
+                    if stage == "name":
                         state["name"] = text
-                        state["stage"] = "waiting_phone"
-                        send_message(
-                            chat_id,
-                            "📞 សូមបញ្ចូលលេខទូរស័ព្ទរបស់អ្នក (ABA / Telegram)។"
-                        )
+                        state["stage"] = "phone"
+                        send_message(chat_id, "📞 សូមបញ្ចូលលេខទូរស័ព្ទរបស់អ្នក")
                         continue
 
-                    # 2) Waiting for phone number
-                    if stage == "waiting_phone":
+                    # waiting phone
+                    if stage == "phone":
                         state["phone"] = text
-                        prize = state.get("prize", "Unknown prize")
-                        username = state.get("username")
-                        name = state.get("name")
-                        phone = state.get("phone")
-                        file_id = state.get("file_id")
 
-                        # Confirm to user
-                        confirm = (
-                            "✅ ឈ្មោះ និងលេខទូរស័ព្ទរបស់អ្នកត្រូវបានរក្សាទុក។\n"
-                            "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ។\n\n"
-                            f"🎁 Prize: {prize}\n"
-                            f"👤 Name: {name}\n"
-                            f"📞 Phone: {phone}"
+                        now_bkk = datetime.utcnow() + timedelta(hours=7)
+                        dt = now_bkk.strftime("%Y-%m-%d %H:%M:%S")
+
+                        prize = state.get("prize")
+                        uname = f"@{username}" if username else "-"
+
+                        summary = (
+                            f"📅 DATE/TIME (Bangkok): {dt}\n"
+                            f"🆔 ID: {chat_id}\n"
+                            f"👤 Full name: {state['name']}\n"
+                            f"📛 Username: {uname}\n"
+                            f"📞 Phone: {state['phone']}\n"
+                            f"🎁 Prize: {prize}"
                         )
-                        send_message(chat_id, confirm)
 
-                        # Send summary to group if configured
-                        if TARGET_GROUP_ID:
-                            now_bkk = datetime.utcnow() + timedelta(hours=7)
-                            dt_str = now_bkk.strftime("%Y-%m-%d %H:%M:%S")
-                            uname_str = f"@{username}" if username else "-"
+                        # send to user
+                        send_message(chat_id, "🎉 បញ្ចប់ការចុះឈ្មោះ! សូមរង់ចាំភ្នាក់ងារទាក់ទង 🙏")
 
-                            summary = (
-                                f"📅 DATE/TIME (Bangkok): {dt_str}\n"
-                                f"🆔 ID: {chat_id}\n"
-                                f"👤 Full name: {name}\n"
-                                f"📛 Username: {uname_str}\n"
-                                f"📞 Phone: {phone}\n"
-                                f"🎁 Prize: {prize}"
-                            )
+                        # forward to group
+                        try:
+                            file_id = state.get("file_id")
+                            if file_id:
+                                requests.post(
+                                    f"{API_URL}/sendPhoto",
+                                    json={
+                                        "chat_id": TARGET_GROUP_ID,
+                                        "photo": file_id,
+                                        "caption": summary,
+                                    },
+                                    timeout=30
+                                )
+                            else:
+                                requests.post(
+                                    f"{API_URL}/sendMessage",
+                                    json={"chat_id": TARGET_GROUP_ID, "text": summary},
+                                    timeout=30
+                                )
+                        except Exception:
+                            log.exception("Failed sending lead to group")
 
-                            try:
-                                if file_id:
-                                    r3 = requests.post(
-                                        f"{API_URL}/sendPhoto",
-                                        json={
-                                            "chat_id": TARGET_GROUP_ID,
-                                            "photo": file_id,
-                                            "caption": summary,
-                                        },
-                                        timeout=30,
-                                    )
-                                else:
-                                    r3 = requests.post(
-                                        f"{API_URL}/sendMessage",
-                                        json={
-                                            "chat_id": TARGET_GROUP_ID,
-                                            "text": summary,
-                                        },
-                                        timeout=30,
-                                    )
-                                if not r3.ok:
-                                    log.error("send to group failed: %s", r3.text)
-                            except Exception:
-                                log.exception("Error sending summary to group")
-
-                        # Clear state
                         USER_STATES.pop(chat_id, None)
                         continue
 
-                # No active state: handle commands
-                if text.startswith("/start"):
-                    log.info("Received /start from chat_id=%s", chat_id)
-                    send_start_message(chat_id)
-                    continue
-
+                # no state → command handling
+                if text == "/start":
+                    send_start(chat_id)
         except Exception:
-            log.exception("Error in polling loop")
-            time.sleep(5)
+            time.sleep(4)
 
 
 app = Flask(__name__)
@@ -205,98 +160,61 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return "Spin Wheel Telegram Bot (lite v3) is running ✅"
+    return "Spin Wheel Bot Lite v4 is running ✅"
 
 
 @app.route("/wheel")
-def wheel():
+def wheel_page():
     return send_from_directory(".", "wheel.html")
 
 
 @app.route("/claim", methods=["POST"])
 def claim():
     data = request.get_json(force=True, silent=True) or {}
-    image_data = data.get("image")
-    prize = data.get("prize", "Unknown prize")
+    image = data.get("image")
+    prize = data.get("prize", "Unknown Prize")
     user_id = data.get("user_id")
-    username = data.get("username")
-    first_name = data.get("first_name")
-    last_name = data.get("last_name")
 
-    if not image_data or user_id is None:
-        return {"ok": False, "error": "missing image or user_id"}, 400
+    if not user_id or not image:
+        return {"ok": False}, 400
 
+    chat_id = int(user_id)
+
+    # decode screenshot
+    base64data = image.split("base64,")[-1]
+    img_bytes = base64.b64decode(base64data)
+
+    resp = requests.post(
+        f"{API_URL}/sendPhoto",
+        data={"chat_id": chat_id, "caption": f"🎯 Prize: {prize}"},
+        files={"photo": ("wheel.png", img_bytes)},
+        timeout=30
+    )
+
+    file_id = None
     try:
-        chat_id = int(user_id)
-    except (TypeError, ValueError):
-        return {"ok": False, "error": "bad user_id"}, 400
+        photos = resp.json()["result"]["photo"]
+        file_id = photos[-1]["file_id"]
+    except:
+        pass
 
-    # Decode base64 image
-    prefix = "base64,"
-    idx = image_data.find(prefix)
-    if idx != -1:
-        b64_data = image_data[idx + len(prefix):]
-    else:
-        b64_data = image_data
+    USER_STATES[chat_id] = {
+        "stage": "name",
+        "prize": prize,
+        "file_id": file_id,
+    }
 
-    try:
-        img_bytes = base64.b64decode(b64_data)
-    except Exception:
-        log.exception("Failed to decode image")
-        return {"ok": False, "error": "decode_error"}, 400
-
-    files = {"photo": ("wheel.png", img_bytes)}
-    caption = f"🎉 Prize: {prize}"
-
-    try:
-        resp = requests.post(
-            f"{API_URL}/sendPhoto",
-            data={"chat_id": chat_id, "caption": caption},
-            files=files,
-            timeout=30,
-        )
-        if not resp.ok:
-            log.error("sendPhoto failed: %s", resp.text)
-            return {"ok": False, "error": "sendPhoto_failed"}, 500
-
-        res_json = resp.json()
-        file_id = None
-        try:
-            photos = res_json["result"]["photo"]
-            file_id = photos[-1]["file_id"]
-        except Exception:
-            pass
-
-        # Save state for this user
-        USER_STATES[chat_id] = {
-            "stage": "waiting_name",
-            "prize": prize,
-            "username": username,
-            "first_name": first_name,
-            "last_name": last_name,
-            "file_id": file_id,
-        }
-
-        # Ask for full name (Khmer)
-        msg = (
-            f"🎉 អបអរសាទរ! អ្នកបានរង្វាន់: *{prize}*\n\n"
-            "សូមផ្ញើឈ្មោះពេញរបស់អ្នកមកខ្ញុំ។"
-        )
-        send_message(chat_id, msg, parse_mode="Markdown")
-
-    except Exception:
-        log.exception("Error in /claim sending photo")
-        return {"ok": False, "error": "exception"}, 500
+    send_message(chat_id, f"🎉 អបអរសាទរ! អ្នកបានឈ្នះ *{prize}*\n\n✍️ សូមផ្ញើឈ្មោះពេញរបស់អ្នក", parse_mode="Markdown")
 
     return {"ok": True}
 
 
 def run_flask():
     port = int(os.environ.get("PORT", 8000))
-    log.info(f"🌐 Flask running on port {port}")
+    log.info("🌐 Flask running on port %s", port)
     app.run(host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
-    run_bot_polling()
+    polling_loop()
