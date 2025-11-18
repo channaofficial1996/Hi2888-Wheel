@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spin Wheel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h2 {
+      margin-top: 10px;
+    }
+    #pointer {
+      width: 0;
+      height: 0;
+      border-left: 15px solid transparent;
+      border-right: 15px solid transparent;
+      border-bottom: 25px solid #e53935;
+      margin: 10px auto;
+    }
+    #wheel {
+      width: 280px;
+      height: 280px;
+      border-radius: 50%;
+      border: 6px solid #333;
+      margin: 10px auto 20px;
+      position: relative;
+      overflow: hidden;
+      background: white;
+      transition: transform 4s cubic-bezier(.17,.67,.32,1.34);
+    }
+    .segment {
+      position: absolute;
+      width: 50%;
+      height: 50%;
+      top: 50%;
+      left: 50%;
+      transform-origin: 0% 0%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      text-align: center;
+      color: #fff;
+      padding: 4px;
+      box-sizing: border-box;
+    }
+    .segment:nth-child(odd) {
+      background: #42a5f5;
+    }
+    .segment:nth-child(even) {
+      background: #66bb6a;
+    }
+    #spinBtn {
+      padding: 12px 30px;
+      font-size: 16px;
+      border-radius: 999px;
+      border: none;
+      background: #ff9800;
+      color: #fff;
+      cursor: pointer;
+    }
+    #spinBtn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    #result {
+      margin-top: 15px;
+      font-size: 16px;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <h2>🎰 Spin & Win</h2>
+  <div id="pointer"></div>
+  <div id="wheel"></div>
+  <button id="spinBtn">SPIN</button>
+  <p id="result"></p>
+
+  <script>
+    const prizes = [
+      "Free Coffee",
+      "50% Discount",
+      "Try Again",
+      "Free Sticker",
+      "Lucky Spin x2",
+      "Small Gift"
+    ];
+
+    const wheel = document.getElementById("wheel");
+    const result = document.getElementById("result");
+    const spinBtn = document.getElementById("spinBtn");
+
+    const anglePer = 360 / prizes.length;
+    let currentRotation = 0;
+    let spinning = false;
+
+    prizes.forEach((text, i) => {
+      const seg = document.createElement("div");
+      seg.className = "segment";
+      seg.style.transform =
+        `rotate(${i * anglePer}deg) skewY(${90 - anglePer}deg)`;
+      seg.textContent = text;
+      wheel.appendChild(seg);
+    });
+
+    spinBtn.onclick = () => {
+      if (spinning) return;
+      spinning = true;
+      spinBtn.disabled = true;
+      result.textContent = "";
+
+      const randIndex = Math.floor(Math.random() * prizes.length);
+      const spins = 5;
+      const targetAngle =
+        spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
+
+      currentRotation += targetAngle;
+      wheel.style.transform = `rotate(${currentRotation}deg)`;
+
+      setTimeout(() => {
+        const prize = prizes[randIndex];
+        result.textContent = "You won: " + prize + " 🎉";
+        spinning = false;
+        spinBtn.disabled = false;
+      }, 4000);
+    };
+  </script>
+</body>
+</html>
