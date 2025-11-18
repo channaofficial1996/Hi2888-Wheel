@@ -65,7 +65,6 @@
     .segment:nth-child(odd)  { background:#42a5f5; }
     .segment:nth-child(even) { background:#66bb6a; }
 
-    /* big center result */
     #center-result {
       position: absolute;
       inset: 25%;
@@ -91,7 +90,6 @@
     #center-result .label { font-size: 12px; opacity: 0.8; margin-bottom: 4px; }
     #center-result .prize-text { font-size: 18px; font-weight: 700; text-align: center; }
 
-    /* buttons */
     #spinBtn {
       padding: 12px 30px;
       font-size: 16px;
@@ -119,18 +117,9 @@
       min-width: 140px;
       color: #fff;
     }
-    #claimBtn {
-      background: #4caf50;
-    }
-    #claimBtn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    #agentBtn {
-      background: #1976d2;
-    }
+    #agentBtn { background:#1976d2; }
 
-    #result {
+    #status {
       margin-top: 10px;
       font-size: 14px;
       font-weight: 500;
@@ -171,13 +160,11 @@
   <button id="spinBtn">SPIN</button>
 
   <div class="bottom-row">
-    <button id="claimBtn" class="btn" disabled>✅ Claim Prize</button>
     <button id="agentBtn" class="btn">💬 Contact Agent</button>
   </div>
 
-  <p id="result"></p>
+  <p id="status"></p>
 
-  <!-- screenshot lib -->
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
   <script>
@@ -191,18 +178,16 @@
     ];
 
     const wheel = document.getElementById("wheel");
-    const result = document.getElementById("result");
     const spinBtn = document.getElementById("spinBtn");
-    const claimBtn = document.getElementById("claimBtn");
     const agentBtn = document.getElementById("agentBtn");
     const center = document.getElementById("center-result");
     const centerPrize = document.getElementById("centerPrize");
+    const statusEl = document.getElementById("status");
 
     const anglePer = 360 / prizes.length;
     let currentRotation = 0;
     let spinning = false;
     let currentPrize = null;
-    let claiming = false;
 
     const tg = window.Telegram && window.Telegram.WebApp
       ? window.Telegram.WebApp
@@ -225,17 +210,16 @@
       document.body.appendChild(celebrate);
       celebrate.innerHTML = "";
       celebrate.style.display = "block";
-      const emojis = ["🎉", "🎊", "✨", "🎈", "⭐"];
+      const emojis = ["🎉","🎊","✨","🎈","⭐"];
 
       for (let i = 0; i < 25; i++) {
         const span = document.createElement("span");
         span.className = "confetti";
-        span.textContent = emojis[Math.floor(Math.random() * emojis.length)];
-        span.style.left = Math.random() * 100 + "vw";
-        span.style.animationDelay = (Math.random() * 0.7) + "s";
+        span.textContent = emojis[Math.floor(Math.random()*emojis.length)];
+        span.style.left = Math.random()*100 + "vw";
+        span.style.animationDelay = (Math.random()*0.7) + "s";
         celebrate.appendChild(span);
       }
-
       setTimeout(() => celebrate.remove(), 2000);
     }
 
@@ -243,8 +227,7 @@
       if (spinning) return;
       spinning = true;
       spinBtn.disabled = true;
-      claimBtn.disabled = true;
-      result.textContent = "";
+      statusEl.textContent = "";
       center.classList.remove("show");
 
       const randIndex = Math.floor(Math.random() * prizes.length);
@@ -261,38 +244,22 @@
 
         centerPrize.textContent = prize;
         center.classList.add("show");
-        result.textContent = "You won: " + prize + " 🎉";
-
+        statusEl.textContent = "You won: " + prize + " 🎉";
         showCelebrate();
-        // enable claim button
-        claimBtn.disabled = false;
+
+        // ✅ AUTO SEND CLAIM TO BOT
+        statusEl.textContent = "Sending to bot...";
+        autoClaim().finally(() => {
+          // បិទ mini app បន្ទាប់ពីផ្ញើរួច
+          if (tg) tg.close();
+        });
 
         spinning = false;
         spinBtn.disabled = false;
       }, 4000);
     };
 
-    claimBtn.onclick = () => {
-      if (!currentPrize || claiming) return;
-      claiming = true;
-      claimBtn.disabled = true;
-      claimBtn.textContent = "Sending...";
-
-      sendClaim()
-        .then(() => {
-          alert("Claim sent: " + currentPrize);
-          if (tg) tg.close();
-        })
-        .catch((err) => {
-          console.error("Claim error:", err);
-          alert("Claim failed, please try again.");
-          claimBtn.disabled = false;
-          claimBtn.textContent = "✅ Claim Prize";
-          claiming = false;
-        });
-    };
-
-    // TODO: change to your real agent link
+    // contact agent link (edit if needed)
     const agentUrl = "https://t.me/chana_on";
     agentBtn.onclick = () => {
       if (tg && tg.openTelegramLink) {
@@ -302,14 +269,19 @@
       }
     };
 
-    function sendClaim() {
+    function autoClaim() {
       const user = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+      if (!user || !user.id) {
+        console.warn("No Telegram user, cannot send claim");
+        return Promise.resolve();
+      }
+
       const basePayload = {
         prize: currentPrize,
-        user_id: user ? user.id : null,
+        user_id: user.id
       };
 
-      // with screenshot
+      // Try with screenshot first
       if (window.html2canvas) {
         return html2canvas(document.getElementById("wheel-wrapper"))
           .then(canvas => {
@@ -318,25 +290,25 @@
 
             return fetch("/claim", {
               method: "POST",
-              headers: {"Content-Type": "application/json"},
-              body: JSON.stringify(payload),
+              headers: {"Content-Type":"application/json"},
+              body: JSON.stringify(payload)
             });
           })
           .catch(err => {
-            console.error("html2canvas failed, fallback:", err);
+            console.error("Screenshot failed, fallback:", err);
             // fallback without image
             return fetch("/claim", {
               method: "POST",
-              headers: {"Content-Type": "application/json"},
-              body: JSON.stringify(basePayload),
+              headers: {"Content-Type":"application/json"},
+              body: JSON.stringify(basePayload)
             });
           });
       } else {
-        // no html2canvas -> text only
+        // no html2canvas -> send text only
         return fetch("/claim", {
           method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify(basePayload),
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(basePayload)
         });
       }
     }
