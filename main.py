@@ -238,8 +238,8 @@ def handle_update(update: dict):
         kb = {
             "inline_keyboard": [
                 [
-                    {"text": "💬 Telegram", "url": "https://t.me/chana_on"},
-                    {"text": "📩 Messenger", "url": "https://m.me/your_page_here"},
+                    {"text": "💬 Telegram", "url": "https://t.me/Hi2888CS1"},
+                    {"text": "📩 Messenger", "url": "m.me/920030077853046"},
                 ]
             ]
         }
