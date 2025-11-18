@@ -125,7 +125,6 @@
       font-weight: 500;
     }
 
-    /* confetti */
     #celebrate {
       position: fixed;
       inset: 0;
@@ -165,168 +164,165 @@
 
   <p id="status"></p>
 
- <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
-<script>
-  const prizes = [
-    "Free Coffee",
-    "50% Discount",
-    "Try Again",
-    "Free Sticker",
-    "Lucky Spin x2",
-    "Small Gift"
-  ];
+  <script>
+    const prizes = [
+      "Free Coffee",
+      "50% Discount",
+      "Try Again",
+      "Free Sticker",
+      "Lucky Spin x2",
+      "Small Gift"
+    ];
 
-  const wheel = document.getElementById("wheel");
-  const spinBtn = document.getElementById("spinBtn");
-  const agentBtn = document.getElementById("agentBtn");
-  const center = document.getElementById("center-result");
-  const centerPrize = document.getElementById("centerPrize");
-  const statusEl = document.getElementById("status");
+    const wheel = document.getElementById("wheel");
+    const spinBtn = document.getElementById("spinBtn");
+    const agentBtn = document.getElementById("agentBtn");
+    const center = document.getElementById("center-result");
+    const centerPrize = document.getElementById("centerPrize");
+    const statusEl = document.getElementById("status");
 
-  const anglePer = 360 / prizes.length;
-  let currentRotation = 0;
-  let spinning = false;
-  let currentPrize = null;
+    const anglePer = 360 / prizes.length;
+    let currentRotation = 0;
+    let spinning = false;
+    let currentPrize = null;
 
-  const tg = window.Telegram && window.Telegram.WebApp
-    ? window.Telegram.WebApp
-    : null;
-  if (tg) tg.expand();
+    const tg = window.Telegram && window.Telegram.WebApp
+      ? window.Telegram.WebApp
+      : null;
+    if (tg) tg.expand();
 
-  // 🔹 អាន chat_id ពី URL (?cid=...)
-  const params = new URLSearchParams(window.location.search);
-  const cidFromUrl = params.get("cid"); // e.g. 5529...
+    // read cid from URL (?cid=chat_id)
+    const params = new URLSearchParams(window.location.search);
+    const cidFromUrl = params.get("cid");
 
-  // build wheel
-  prizes.forEach((text, i) => {
-    const seg = document.createElement("div");
-    seg.className = "segment";
-    seg.style.transform =
-      `rotate(${i * anglePer}deg) skewY(${90 - anglePer}deg)`;
-    seg.textContent = text;
-    wheel.appendChild(seg);
-  });
+    // build wheel
+    prizes.forEach((text, i) => {
+      const seg = document.createElement("div");
+      seg.className = "segment";
+      seg.style.transform =
+        `rotate(${i * anglePer}deg) skewY(${90 - anglePer}deg)`;
+      seg.textContent = text;
+      wheel.appendChild(seg);
+    });
 
-  function showCelebrate() {
-    const celebrate = document.createElement("div");
-    celebrate.id = "celebrate";
-    document.body.appendChild(celebrate);
-    celebrate.innerHTML = "";
-    celebrate.style.display = "block";
-    const emojis = ["🎉","🎊","✨","🎈","⭐"];
+    function showCelebrate() {
+      const celebrate = document.createElement("div");
+      celebrate.id = "celebrate";
+      document.body.appendChild(celebrate);
+      celebrate.innerHTML = "";
+      celebrate.style.display = "block";
+      const emojis = ["🎉","🎊","✨","🎈","⭐"];
 
-    for (let i = 0; i < 25; i++) {
-      const span = document.createElement("span");
-      span.className = "confetti";
-      span.textContent = emojis[Math.floor(Math.random()*emojis.length)];
-      span.style.left = Math.random()*100 + "vw";
-      span.style.animationDelay = (Math.random()*0.7) + "s";
-      celebrate.appendChild(span);
+      for (let i = 0; i < 25; i++) {
+        const span = document.createElement("span");
+        span.className = "confetti";
+        span.textContent = emojis[Math.floor(Math.random()*emojis.length)];
+        span.style.left = Math.random()*100 + "vw";
+        span.style.animationDelay = (Math.random()*0.7) + "s";
+        celebrate.appendChild(span);
+      }
+      setTimeout(() => celebrate.remove(), 2000);
     }
-    setTimeout(() => celebrate.remove(), 2000);
-  }
 
-  spinBtn.onclick = () => {
-    if (spinning) return;
-    spinning = true;
-    spinBtn.disabled = true;
-    statusEl.textContent = "";
-    center.classList.remove("show");
+    spinBtn.onclick = () => {
+      if (spinning) return;
+      spinning = true;
+      spinBtn.disabled = true;
+      statusEl.textContent = "";
+      center.classList.remove("show");
 
-    const randIndex = Math.floor(Math.random() * prizes.length);
-    const spins = 5;
-    const targetAngle =
-      spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
+      const randIndex = Math.floor(Math.random() * prizes.length);
+      const spins = 5;
+      const targetAngle =
+        spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
 
-    currentRotation += targetAngle;
-    wheel.style.transform = `rotate(${currentRotation}deg)`;
+      currentRotation += targetAngle;
+      wheel.style.transform = `rotate(${currentRotation}deg)`;
 
-    setTimeout(() => {
-      const prize = prizes[randIndex];
-      currentPrize = prize;
+      setTimeout(() => {
+        const prize = prizes[randIndex];
+        currentPrize = prize;
 
-      centerPrize.textContent = prize;
-      center.classList.add("show");
-      statusEl.textContent = "You won: " + prize + " 🎉";
-      showCelebrate();
+        centerPrize.textContent = prize;
+        center.classList.add("show");
+        statusEl.textContent = "You won: " + prize + " 🎉";
+        showCelebrate();
 
-      // ✅ AUTO SEND CLAIM TO BOT
-      statusEl.textContent = "Sending to bot...";
-      autoClaim()
-        .then((ok) => {
-          if (ok) {
-            statusEl.textContent = "✅ Sent! Please check the chat.";
-          } else {
+        statusEl.textContent = "Sending to bot...";
+        autoClaim()
+          .then((ok) => {
+            if (ok) {
+              statusEl.textContent = "✅ Sent! Please check the chat.";
+            } else {
+              statusEl.textContent = "❌ Failed to send, please try again.";
+            }
+          })
+          .catch(err => {
+            console.error("Claim error:", err);
             statusEl.textContent = "❌ Failed to send, please try again.";
-          }
-        })
-        .catch((err) => {
-          console.error("Claim error:", err);
-          statusEl.textContent = "❌ Failed to send, please try again.";
-        })
-        .finally(() => {
-          if (tg) tg.close();
-        });
+          })
+          .finally(() => {
+            if (tg) tg.close();
+          });
 
-      spinning = false;
-      spinBtn.disabled = false;
-    }, 4000);
-  };
-
-  // contact agent link (edit if needed)
-  const agentUrl = "https://t.me/chana_on";
-  agentBtn.onclick = () => {
-    if (tg && tg.openTelegramLink) {
-      tg.openTelegramLink(agentUrl);
-    } else {
-      window.open(agentUrl, "_blank");
-    }
-  };
-
-  function autoClaim() {
-    const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
-
-    // 🔹 Priority: cid from URL (chat_id), fallback to WebApp user.id
-    const userId = cidFromUrl || (webUser && webUser.id) || null;
-
-    const basePayload = {
-      prize: currentPrize,
-      user_id: userId,
+        spinning = false;
+        spinBtn.disabled = false;
+      }, 4000);
     };
 
-    // បើ userId មិនមាន ទុកឲ្យ server error 400 (log) ដើម្បីកុំឲ្យបាត់បង់បញ្ហា
-    if (!userId) {
-      console.warn("No user_id/cid found, cannot send claim correctly.");
-    }
+    const agentUrl = "https://t.me/chana_on";
+    agentBtn.onclick = () => {
+      if (tg && tg.openTelegramLink) {
+        tg.openTelegramLink(agentUrl);
+      } else {
+        window.open(agentUrl, "_blank");
+      }
+    };
 
-    if (window.html2canvas) {
-      return html2canvas(document.getElementById("wheel-wrapper"))
-        .then(canvas => {
-          const dataUrl = canvas.toDataURL("image/png");
-          const payload = Object.assign({}, basePayload, { image: dataUrl });
+    function autoClaim() {
+      const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+      const userId = cidFromUrl || (webUser && webUser.id) || null;
 
-          return fetch("/claim", {
-            method: "POST",
-            headers: {"Content-Type":"application/json"},
-            body: JSON.stringify(payload)
+      const basePayload = {
+        prize: currentPrize,
+        user_id: userId,
+      };
+
+      if (!userId) {
+        console.warn("No user_id/cid found, claim may fail.");
+      }
+
+      if (window.html2canvas) {
+        return html2canvas(document.getElementById("wheel-wrapper"))
+          .then(canvas => {
+            const dataUrl = canvas.toDataURL("image/png");
+            const payload = Object.assign({}, basePayload, { image: dataUrl });
+
+            return fetch("/claim", {
+              method: "POST",
+              headers: {"Content-Type":"application/json"},
+              body: JSON.stringify(payload)
+            });
+          })
+          .then(r => r && r.ok)
+          .catch(err => {
+            console.error("Screenshot failed, fallback:", err);
+            return fetch("/claim", {
+              method: "POST",
+              headers: {"Content-Type":"application/json"},
+              body: JSON.stringify(basePayload)
+            }).then(r => r && r.ok);
           });
-        })
-        .then(r => r && r.ok)
-        .catch(err => {
-          console.error("Screenshot failed, fallback:", err);
-          return fetch("/claim", {
-            method: "POST",
-            headers: {"Content-Type":"application/json"},
-            body: JSON.stringify(basePayload)
-          }).then(r => r && r.ok);
-        });
-    } else {
-      return fetch("/claim", {
-        method: "POST",
-        headers: {"Content-Type":"application/json"},
-        body: JSON.stringify(basePayload)
-      }).then(r => r && r.ok);
+      } else {
+        return fetch("/claim", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(basePayload)
+        }).then(r => r && r.ok);
+      }
     }
-  }
-</script>
+  </script>
+</body>
+</html>
