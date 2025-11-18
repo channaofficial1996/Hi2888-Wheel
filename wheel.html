@@ -14,21 +14,33 @@
     }
     h2 {
       margin-top: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    #emoji {
+      font-size: 26px;
     }
     #pointer {
       width: 0;
       height: 0;
-      border-left: 15px solid transparent;
-      border-right: 15px solid transparent;
-      border-bottom: 25px solid #e53935;
+      border-left: 18px solid transparent;
+      border-right: 18px solid transparent;
+      border-bottom: 30px solid #e53935;
       margin: 10px auto;
     }
-    #wheel {
+    #wheel-wrapper {
+      position: relative;
       width: 280px;
       height: 280px;
+      margin: 10px auto 20px;
+    }
+    #wheel {
+      width: 100%;
+      height: 100%;
       border-radius: 50%;
       border: 6px solid #333;
-      margin: 10px auto 20px;
       position: relative;
       overflow: hidden;
       background: white;
@@ -56,6 +68,58 @@
     .segment:nth-child(even) {
       background: #66bb6a;
     }
+
+    #center-result {
+      position: absolute;
+      inset: 25%;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      padding: 10px;
+      box-sizing: border-box;
+      opacity: 0;
+      transform: scale(0.5);
+      pointer-events: none;
+      transition: all 0.35s ease-out;
+    }
+    #center-result.show {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: auto;
+    }
+    #center-result .label {
+      font-size: 12px;
+      opacity: 0.8;
+      margin-bottom: 4px;
+    }
+    #center-result .prize-text {
+      font-size: 18px;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    #celebrate {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 50;
+      font-size: 24px;
+      display: none;
+    }
+    .confetti {
+      position: absolute;
+      animation: fall 1.5s linear forwards;
+    }
+    @keyframes fall {
+      from { transform: translateY(-40px) rotate(0deg); opacity: 1; }
+      to   { transform: translateY(120vh) rotate(360deg); opacity: 0; }
+    }
+
     #spinBtn {
       padding: 12px 30px;
       font-size: 16px;
@@ -64,24 +128,69 @@
       background: #ff9800;
       color: #fff;
       cursor: pointer;
+      margin-top: 8px;
+      min-width: 140px;
     }
     #spinBtn:disabled {
       opacity: 0.6;
       cursor: not-allowed;
     }
+
+    .action-buttons {
+      margin-top: 16px;
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+    }
+    .action-buttons button {
+      padding: 10px 16px;
+      font-size: 14px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      min-width: 130px;
+    }
+    #btnClaim {
+      background: #43a047;
+      color: #fff;
+    }
+    #btnContact {
+      background: #1976d2;
+      color: #fff;
+    }
+
     #result {
-      margin-top: 15px;
-      font-size: 16px;
-      font-weight: 600;
+      margin-top: 10px;
+      font-size: 14px;
+      font-weight: 500;
     }
   </style>
 </head>
 <body>
-  <h2>🎰 Spin & Win</h2>
+  <h2><span id="emoji">🎰</span> <span>Spin & Win</span></h2>
   <div id="pointer"></div>
-  <div id="wheel"></div>
+
+  <div id="wheel-wrapper">
+    <div id="wheel"></div>
+
+    <div id="center-result">
+      <div class="label">You won</div>
+      <div class="prize-text" id="centerPrize">-</div>
+    </div>
+  </div>
+
   <button id="spinBtn">SPIN</button>
+
+  <div class="action-buttons">
+    <button id="btnClaim" disabled>✅ Claim Prize</button>
+    <button id="btnContact">💬 Contact Agent</button>
+  </div>
+
   <p id="result"></p>
+
+  <div id="celebrate"></div>
+
+  <audio id="clapSound" preload="auto"></audio>
 
   <script>
     const prizes = [
@@ -92,14 +201,29 @@
       "Lucky Spin x2",
       "Small Gift"
     ];
+    const agentUrl = "https://t.me/your_agent_here"; // TODO: change to your agent link
 
     const wheel = document.getElementById("wheel");
     const result = document.getElementById("result");
     const spinBtn = document.getElementById("spinBtn");
+    const center = document.getElementById("center-result");
+    const centerPrize = document.getElementById("centerPrize");
+    const celebrate = document.getElementById("celebrate");
+    const clapSound = document.getElementById("clapSound");
+    const btnClaim = document.getElementById("btnClaim");
+    const btnContact = document.getElementById("btnContact");
 
     const anglePer = 360 / prizes.length;
     let currentRotation = 0;
     let spinning = false;
+    let currentPrize = null;
+
+    const tg = window.Telegram && window.Telegram.WebApp
+      ? window.Telegram.WebApp
+      : null;
+    if (tg) {
+      tg.expand();
+    }
 
     prizes.forEach((text, i) => {
       const seg = document.createElement("div");
@@ -110,11 +234,41 @@
       wheel.appendChild(seg);
     });
 
+    function showCelebrate() {
+      celebrate.innerHTML = "";
+      celebrate.style.display = "block";
+      const emojis = ["🎉", "🎊", "✨", "🎈", "⭐"];
+
+      for (let i = 0; i < 25; i++) {
+        const span = document.createElement("span");
+        span.className = "confetti";
+        span.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+        span.style.left = Math.random() * 100 + "vw";
+        span.style.animationDelay = (Math.random() * 0.7) + "s";
+        celebrate.appendChild(span);
+      }
+
+      setTimeout(() => {
+        celebrate.style.display = "none";
+      }, 2000);
+    }
+
+    function playClap() {
+      try {
+        // You can set src dynamically to some hosted clap sound
+        // clapSound.src = "https://example.com/clap.mp3";
+        clapSound.currentTime = 0;
+        clapSound.play().catch(() => {});
+      } catch (e) {}
+    }
+
     spinBtn.onclick = () => {
       if (spinning) return;
       spinning = true;
       spinBtn.disabled = true;
+      btnClaim.disabled = true;
       result.textContent = "";
+      center.classList.remove("show");
 
       const randIndex = Math.floor(Math.random() * prizes.length);
       const spins = 5;
@@ -126,10 +280,45 @@
 
       setTimeout(() => {
         const prize = prizes[randIndex];
-        result.textContent = "You won: " + prize + " 🎉";
+        currentPrize = prize;
+
+        setTimeout(() => {
+          centerPrize.textContent = prize;
+          center.classList.add("show");
+          result.textContent = "You won: " + prize + " 🎉";
+
+          btnClaim.disabled = false;
+          showCelebrate();
+          playClap();
+        }, 150);
+
         spinning = false;
         spinBtn.disabled = false;
       }, 4000);
+    };
+
+    btnClaim.onclick = () => {
+      if (!currentPrize) return;
+
+      if (tg && tg.sendData) {
+        const payload = {
+          action: "claim_prize",
+          prize: currentPrize,
+          ts: Date.now()
+        };
+        tg.sendData(JSON.stringify(payload));
+        tg.close();
+      } else {
+        alert("Claim sent: " + currentPrize);
+      }
+    };
+
+    btnContact.onclick = () => {
+      if (tg && tg.openTelegramLink) {
+        tg.openTelegramLink(agentUrl);
+      } else {
+        window.open(agentUrl, "_blank");
+      }
     };
   </script>
 </body>

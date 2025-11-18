@@ -18,8 +18,6 @@ if not WEBAPP_URL:
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# ---------------- Telegram basic polling (no external lib) ---------------- #
-
 def send_start_message(chat_id: int):
     wheel_url = f"{WEBAPP_URL}/wheel"
     text = "Welcome! 🎉\nPress the button below to spin the wheel!"
@@ -75,29 +73,64 @@ def run_bot_polling():
                 if not message:
                     continue
 
-                text = message.get("text") or ""
                 chat = message.get("chat") or {}
                 chat_id = chat.get("id")
-
                 if not chat_id:
                     continue
 
+                text = message.get("text") or ""
+
+                # 1) /start command
                 if text.startswith("/start"):
                     log.info("Received /start from chat_id=%s", chat_id)
                     send_start_message(chat_id)
+                    continue
+
+                # 2) WebApp data (claim prize)
+                web_app_data = message.get("web_app_data")
+                if web_app_data:
+                    raw = web_app_data.get("data")
+                    log.info("Received web_app_data from %s: %s", chat_id, raw)
+                    try:
+                        import json
+                        payload = json.loads(raw)
+                    except Exception:
+                        payload = None
+
+                    if isinstance(payload, dict) and payload.get("action") == "claim_prize":
+                        prize = payload.get("prize", "Unknown prize")
+                        text_reply = (
+                            f"🎉 You claimed: *{prize}*\n\n"
+                            "Please send me your *full name* and *phone number* "
+                            "so our agent can contact you."
+                        )
+                        try:
+                            r2 = requests.post(
+                                f"{API_URL}/sendMessage",
+                                json={
+                                    "chat_id": chat_id,
+                                    "text": text_reply,
+                                    "parse_mode": "Markdown"
+                                },
+                                timeout=10,
+                            )
+                            if not r2.ok:
+                                log.error("sendMessage claim reply failed: %s", r2.text)
+                        except Exception:
+                            log.exception("Error sending claim reply")
+
+                    continue
 
         except Exception:
             log.exception("Error in polling loop")
             time.sleep(5)
 
 
-# ---------------- Flask web app for Railway & wheel UI ---------------- #
-
 app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return "Spin Wheel Telegram Bot (lite) is running ✅"
+    return "Spin Wheel Telegram Bot (lite v2) is running ✅"
 
 @app.route("/wheel")
 def wheel():
@@ -108,11 +141,6 @@ def run_flask():
     log.info(f"🌐 Flask running on port {port}")
     app.run(host="0.0.0.0", port=port)
 
-
-# ---------------- Main entry ---------------- #
-
 if __name__ == "__main__":
-    # Start Flask in background
     threading.Thread(target=run_flask, daemon=True).start()
-    # Start polling in main thread
     run_bot_polling()
