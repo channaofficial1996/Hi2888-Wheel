@@ -1,289 +1,332 @@
-# main.py  — 2888 Wheel (final, with group report)
-
-import os
-import time
-import base64
-import logging
-from datetime import datetime
-from io import BytesIO
-
-import requests
-from flask import Flask, request, jsonify
-
-# --------- ENV ---------
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBAPP_URL = os.getenv("WEBAPP_URL", "").rstrip("/")
-TARGET_GROUP_ID = os.getenv("TARGET_GROUP_ID")  # keep as string
-
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN not set")
-if not WEBAPP_URL:
-    raise RuntimeError("WEBAPP_URL not set")
-if not TARGET_GROUP_ID:
-    raise RuntimeError("TARGET_GROUP_ID not set")
-
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("wheelbot-final")
-
-# user_id -> state data
-user_states = {}  # { user_id: {"step": "...", "prize": "...", "photo_id": "..."} }
-
-# --------- Telegram helpers ---------
-def tg_request(method: str, params: dict = None, files: dict = None):
-    url = f"{API_URL}/{method}"
-    try:
-        if files:
-            r = requests.post(url, data=params or {}, files=files, timeout=30)
-        else:
-            r = requests.post(url, json=params or {}, timeout=30)
-        if not r.ok:
-            log.error("Telegram API error %s: %s", method, r.text)
-        return r.json()
-    except Exception as e:
-        log.exception("Telegram request failed: %s", e)
-        return None
-
-
-def send_message(chat_id, text, reply_markup=None):
-    return tg_request(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "reply_markup": reply_markup,
-        },
-    )
-
-
-def send_photo(chat_id, photo, caption=None):
-    """photo can be file_id (str) or BytesIO."""
-    if isinstance(photo, str) and not hasattr(photo, "read"):
-        # existing file_id
-        return tg_request(
-            "sendPhoto",
-            {"chat_id": chat_id, "photo": photo, "caption": caption or ""},
-        )
-    else:
-        files = {"photo": ("wheel.png", photo, "image/png")}
-        return tg_request(
-            "sendPhoto",
-            {"chat_id": chat_id, "caption": caption or ""},
-            files=files,
-        )
-
-
-def send_start_message(chat_id: int):
-    wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=42"
-
-    text = (
-        "🎰 សូមស្វាគមន៍មកកាន់កង់រង្វាន់!\n"
-        "ចុចប៊ូតុងខាងក្រោម ដើម្បីចាប់ផ្តើម SPIN Wheel 🎯"
-    )
-    reply_markup = {
-        "inline_keyboard": [
-            [
-                {
-                    "text": "🎰 Open Spin Wheel",
-                    "web_app": {"url": wheel_url},
-                }
-            ]
-        ]
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spin Wheel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
     }
-    send_message(chat_id, text, reply_markup=reply_markup)
+    h2 {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    #emoji { font-size: 26px; }
 
-
-# --------- Flask app ---------
-app = Flask(__name__)
-
-
-@app.route("/")
-def index():
-    return "Spin Wheel Telegram Bot is running ✅"
-
-
-@app.route("/wheel")
-def wheel_page():
-    # served by static file on Railway (wheel.html)
-    # Railway will map /wheel to this app; we just redirect to static template if needed
-    # For simplicity, return small text here; static hosting usually serves actual HTML
-    return "Wheel page should be served as static file."
-
-
-@app.route("/claim", methods=["POST"])
-def claim():
-    """
-    Called from wheel.html (WebApp) with JSON:
-    { "user_id": "...", "prize": "...", "image": "data:image/png;base64,..." }
-    """
-    data = request.get_json(force=True, silent=True) or {}
-    user_id = data.get("user_id")
-    prize = data.get("prize")
-    image_data_url = data.get("image")
-
-    if not user_id:
-        log.error("/claim without user_id: %s", data)
-        return jsonify({"ok": False, "error": "missing user_id"}), 400
-
-    log.info("Received claim from %s: %s", user_id, prize)
-
-    photo_id = None
-
-    # If we have screenshot, decode + send photo to user now (and remember file_id)
-    if image_data_url and image_data_url.startswith("data:image"):
-        try:
-            header, b64 = image_data_url.split(",", 1)
-            img_bytes = base64.b64decode(b64)
-            bio = BytesIO(img_bytes)
-            bio.name = "wheel.png"
-            resp = send_photo(
-                user_id,
-                bio,
-                caption=f"🎰 លទ្ធផលកង់រង្វាន់របស់អ្នក:\n<b>{prize}</b>",
-            )
-            if resp and resp.get("ok"):
-                photo_list = resp["result"]["photo"]
-                photo_id = photo_list[-1]["file_id"]
-        except Exception as e:
-            log.exception("Failed to decode/send screenshot: %s", e)
-
-    # save state
-    user_states[user_id] = {
-        "step": "ask_name",
-        "prize": prize,
-        "photo_id": photo_id,
-        "created_at": time.time(),
+    #pointer {
+      width: 0;
+      height: 0;
+      border-left: 18px solid transparent;
+      border-right: 18px solid transparent;
+      border-bottom: 30px solid #e53935;
+      margin: 10px auto;
     }
 
-    # ask name
-    send_message(
-        user_id,
-        "🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់ <b>{}</b> 🎁\n\n"
-        "សូមបញ្ចូល <b>ឈ្មោះពេញ</b> របស់អ្នក៖".format(prize),
-    )
+    #wheel-wrapper {
+      position: relative;
+      width: 280px;
+      height: 280px;
+      margin: 10px auto 12px;
+    }
+    #wheel {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 6px solid #333;
+      position: relative;
+      overflow: hidden;
+      background: #ffffff;
+      transition: transform 4s cubic-bezier(.17,.67,.32,1.34);
+    }
+    .segment {
+      position: absolute;
+      width: 50%;
+      height: 50%;
+      top: 50%;
+      left: 50%;
+      transform-origin: 0% 0%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      text-align: center;
+      color: #fff;
+      padding: 4px;
+      box-sizing: border-box;
+    }
+    .segment:nth-child(odd)  { background:#42a5f5; }
+    .segment:nth-child(even) { background:#66bb6a; }
 
-    return jsonify({"ok": True})
+    #center-result {
+      position: absolute;
+      inset: 25%;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      padding: 10px;
+      box-sizing: border-box;
+      opacity: 0;
+      transform: scale(0.5);
+      pointer-events: none;
+      transition: all 0.35s ease-out;
+    }
+    #center-result.show {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: auto;
+    }
+    #center-result .label { font-size: 12px; opacity: 0.8; margin-bottom: 4px; }
+    #center-result .prize-text { font-size: 18px; font-weight: 700; text-align: center; }
 
+    #spinBtn {
+      padding: 12px 30px;
+      font-size: 16px;
+      border-radius: 999px;
+      border: none;
+      background: #ff9800;
+      color: #fff;
+      cursor: pointer;
+      min-width: 140px;
+    }
+    #spinBtn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-# --------- Polling loop ---------
-def handle_update(update: dict):
-    """Handle one Telegram update (for long polling)."""
-    if "message" not in update:
-        return
-    msg = update["message"]
-    chat = msg.get("chat", {})
-    chat_id = chat.get("id")
-    text = msg.get("text", "")
-    from_user = msg.get("from", {})
-    user_id = from_user.get("id")
+    .bottom-row {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 12px;
+    }
+    .btn {
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+      min-width: 140px;
+      color: #fff;
+    }
+    #agentBtn { background:#1976d2; }
 
-    # commands
-    if text == "/start":
-        send_start_message(chat_id)
-        return
+    #status {
+      margin-top: 10px;
+      font-size: 14px;
+      font-weight: 500;
+    }
 
-    # only handle text messages for claim flow
-    if not isinstance(text, str):
-        return
+    /* confetti */
+    #celebrate {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 50;
+      font-size: 24px;
+      display: none;
+    }
+    .confetti {
+      position: absolute;
+      animation: fall 1.5s linear forwards;
+    }
+    @keyframes fall {
+      from { transform: translateY(-40px) rotate(0deg); opacity: 1; }
+      to   { transform: translateY(120vh) rotate(360deg); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <h2><span id="emoji">🎰</span><span>Spin & Win</span></h2>
+  <div id="pointer"></div>
 
-    state = user_states.get(user_id)
-    if not state:
-        return  # no active claim
+  <div id="wheel-wrapper">
+    <div id="wheel"></div>
+    <div id="center-result">
+      <div class="label">You won</div>
+      <div class="prize-text" id="centerPrize">-</div>
+    </div>
+  </div>
 
-    step = state.get("step")
+  <button id="spinBtn">SPIN</button>
 
-    # Step 1: ask_name
-    if step == "ask_name":
-        full_name = text.strip()
-        if not full_name:
-            send_message(chat_id, "សូមបញ្ចូល <b>ឈ្មោះពេញ</b> ម្ដងទៀត 🙏")
-            return
-        state["full_name"] = full_name
-        state["step"] = "ask_phone"
-        send_message(
-            chat_id,
-            "✅ បានឈ្មោះ៖ <b>{}</b>\n\nសូមបន្តបញ្ចូល <b>លេខទូរស័ព្ទ</b> របស់អ្នក៖".format(
-                full_name
-            ),
-        )
-        return
+  <div class="bottom-row">
+    <button id="agentBtn" class="btn">💬 Contact Agent</button>
+  </div>
 
-    # Step 2: ask_phone
-    if step == "ask_phone":
-        phone = text.strip()
-        state["phone"] = phone
-        state["step"] = "done"
+  <p id="status"></p>
 
-        prize = state.get("prize", "-")
-        photo_id = state.get("photo_id")
-        username = from_user.get("username")
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+ <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
-        # confirm to user
-        send_message(
-            chat_id,
-            "🎉 <b>បញ្ជាក់ជោគជ័យ!</b>\n\n"
-            "ឈ្មោះ៖ <b>{}</b>\n"
-            "លេខទូរស័ព្ទ៖ <b>{}</b>\n"
-            "រង្វាន់៖ <b>{}</b>\n\n"
-            "សូមរង់ចាំភ្នាក់ងារ ទាក់ទងមកវិញ ❤️".format(
-                state["full_name"], phone, prize
-            ),
-        )
+<script>
+  const prizes = [
+    "Free Coffee",
+    "50% Discount",
+    "Try Again",
+    "Free Sticker",
+    "Lucky Spin x2",
+    "Small Gift"
+  ];
 
-        # send report to group
-        report = (
-            "🎁 <b>New Prize Claim</b>\n\n"
-            f"📅 <b>Date/Time (Bangkok)</b>: {now_str}\n"
-            f"🆔 <b>User ID</b>: <code>{user_id}</code>\n"
-            f"👤 <b>Full name</b>: {state['full_name']}\n"
-            f"📞 <b>Phone</b>: {phone}\n"
-            f"🎯 <b>Prize</b>: {prize}\n"
-        )
-        if username:
-            report += f"📛 <b>Username</b>: @{username}\n"
+  const wheel = document.getElementById("wheel");
+  const spinBtn = document.getElementById("spinBtn");
+  const agentBtn = document.getElementById("agentBtn");
+  const center = document.getElementById("center-result");
+  const centerPrize = document.getElementById("centerPrize");
+  const statusEl = document.getElementById("status");
 
-        # with screenshot if available
-        if photo_id:
-            send_photo(TARGET_GROUP_ID, photo_id, caption=report)
-        else:
-            send_message(TARGET_GROUP_ID, report)
+  const anglePer = 360 / prizes.length;
+  let currentRotation = 0;
+  let spinning = false;
+  let currentPrize = null;
 
-        # cleanup
-        user_states.pop(user_id, None)
+  const tg = window.Telegram && window.Telegram.WebApp
+    ? window.Telegram.WebApp
+    : null;
+  if (tg) tg.expand();
 
+  // 🔹 អាន chat_id ពី URL (?cid=...)
+  const params = new URLSearchParams(window.location.search);
+  const cidFromUrl = params.get("cid"); // e.g. 5529...
 
-def run_bot_loop():
-    log.info("🚀 Bot long-polling loop started")
-    offset = None
-    while True:
-        try:
-            resp = requests.get(
-                f"{API_URL}/getUpdates",
-                params={"timeout": 50, "offset": offset},
-                timeout=60,
-            ).json()
-        except Exception as e:
-            log.exception("getUpdates failed: %s", e)
-            time.sleep(3)
-            continue
+  // build wheel
+  prizes.forEach((text, i) => {
+    const seg = document.createElement("div");
+    seg.className = "segment";
+    seg.style.transform =
+      `rotate(${i * anglePer}deg) skewY(${90 - anglePer}deg)`;
+    seg.textContent = text;
+    wheel.appendChild(seg);
+  });
 
-        if not resp.get("ok"):
-            log.error("getUpdates error: %s", resp)
-            time.sleep(3)
-            continue
+  function showCelebrate() {
+    const celebrate = document.createElement("div");
+    celebrate.id = "celebrate";
+    document.body.appendChild(celebrate);
+    celebrate.innerHTML = "";
+    celebrate.style.display = "block";
+    const emojis = ["🎉","🎊","✨","🎈","⭐"];
 
-        for upd in resp.get("result", []):
-            offset = upd["update_id"] + 1
-            handle_update(upd)
+    for (let i = 0; i < 25; i++) {
+      const span = document.createElement("span");
+      span.className = "confetti";
+      span.textContent = emojis[Math.floor(Math.random()*emojis.length)];
+      span.style.left = Math.random()*100 + "vw";
+      span.style.animationDelay = (Math.random()*0.7) + "s";
+      celebrate.appendChild(span);
+    }
+    setTimeout(() => celebrate.remove(), 2000);
+  }
 
+  spinBtn.onclick = () => {
+    if (spinning) return;
+    spinning = true;
+    spinBtn.disabled = true;
+    statusEl.textContent = "";
+    center.classList.remove("show");
 
-if __name__ == "__main__":
-    # Railway: run Flask + polling in same process using threads
-    from threading import Thread
+    const randIndex = Math.floor(Math.random() * prizes.length);
+    const spins = 5;
+    const targetAngle =
+      spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
 
-    Thread(target=run_bot_loop, daemon=True).start()
-    log.info("🌐 Flask running on port 8080")
-    app.run(host="0.0.0.0", port=8080)
+    currentRotation += targetAngle;
+    wheel.style.transform = `rotate(${currentRotation}deg)`;
+
+    setTimeout(() => {
+      const prize = prizes[randIndex];
+      currentPrize = prize;
+
+      centerPrize.textContent = prize;
+      center.classList.add("show");
+      statusEl.textContent = "You won: " + prize + " 🎉";
+      showCelebrate();
+
+      // ✅ AUTO SEND CLAIM TO BOT
+      statusEl.textContent = "Sending to bot...";
+      autoClaim()
+        .then((ok) => {
+          if (ok) {
+            statusEl.textContent = "✅ Sent! Please check the chat.";
+          } else {
+            statusEl.textContent = "❌ Failed to send, please try again.";
+          }
+        })
+        .catch((err) => {
+          console.error("Claim error:", err);
+          statusEl.textContent = "❌ Failed to send, please try again.";
+        })
+        .finally(() => {
+          if (tg) tg.close();
+        });
+
+      spinning = false;
+      spinBtn.disabled = false;
+    }, 4000);
+  };
+
+  // contact agent link (edit if needed)
+  const agentUrl = "https://t.me/chana_on";
+  agentBtn.onclick = () => {
+    if (tg && tg.openTelegramLink) {
+      tg.openTelegramLink(agentUrl);
+    } else {
+      window.open(agentUrl, "_blank");
+    }
+  };
+
+  function autoClaim() {
+    const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+
+    // 🔹 Priority: cid from URL (chat_id), fallback to WebApp user.id
+    const userId = cidFromUrl || (webUser && webUser.id) || null;
+
+    const basePayload = {
+      prize: currentPrize,
+      user_id: userId,
+    };
+
+    // បើ userId មិនមាន ទុកឲ្យ server error 400 (log) ដើម្បីកុំឲ្យបាត់បង់បញ្ហា
+    if (!userId) {
+      console.warn("No user_id/cid found, cannot send claim correctly.");
+    }
+
+    if (window.html2canvas) {
+      return html2canvas(document.getElementById("wheel-wrapper"))
+        .then(canvas => {
+          const dataUrl = canvas.toDataURL("image/png");
+          const payload = Object.assign({}, basePayload, { image: dataUrl });
+
+          return fetch("/claim", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify(payload)
+          });
+        })
+        .then(r => r && r.ok)
+        .catch(err => {
+          console.error("Screenshot failed, fallback:", err);
+          return fetch("/claim", {
+            method: "POST",
+            headers: {"Content-Type":"application/json"},
+            body: JSON.stringify(basePayload)
+          }).then(r => r && r.ok);
+        });
+    } else {
+      return fetch("/claim", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify(basePayload)
+      }).then(r => r && r.ok);
+    }
+  }
+</script>
