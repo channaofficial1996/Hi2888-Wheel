@@ -164,12 +164,16 @@ def claim():
         "created_at": time.time(),
     }
 
-    # ask name (message ដាច់ពីគេ)
-    send_message(
-        user_id,
-        "🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់៖ <b>{}</b> 🎁\n\n"
-        "✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> របស់អ្នក។".format(prize),
-    )
+ import time
+
+# Ask name (delay fix)
+time.sleep(1.2)  # prevent lost message after WebApp close
+
+send_message(
+    user_id,
+    f"🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់៖ <b>{prize}</b> 🎁\n\n"
+    "✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> របស់អ្នក។"
+)
 
     return jsonify({"ok": True})
 
