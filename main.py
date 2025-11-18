@@ -1,4 +1,7 @@
-# main.py  — 2888 Wheel (final, with group report)
+# main.py  — 2888 Wheel (final v5)
+# - Flask run on port 8080
+# - /wheel serve wheel.html
+# - /claim ពី WebApp -> bot DM (Name, Phone) -> report ទៅ group
 
 import os
 import time
@@ -6,9 +9,10 @@ import base64
 import logging
 from datetime import datetime
 from io import BytesIO
+from threading import Thread
 
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_from_directory
 
 # --------- ENV ---------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -76,6 +80,7 @@ def send_photo(chat_id, photo, caption=None):
 
 
 def send_start_message(chat_id: int):
+    # បញ្ជូន chat_id (cid) ទៅក្នុង URL ដើម្បី WebApp ប្រើ
     wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=42"
 
     text = (
@@ -104,12 +109,10 @@ def index():
     return "Spin Wheel Telegram Bot is running ✅"
 
 
+# 👉 serve wheel.html ដោយផ្ទាល់ (wheel.html នៅគន្លងដូច main.py)
 @app.route("/wheel")
 def wheel_page():
-    # served by static file on Railway (wheel.html)
-    # Railway will map /wheel to this app; we just redirect to static template if needed
-    # For simplicity, return small text here; static hosting usually serves actual HTML
-    return "Wheel page should be served as static file."
+    return send_from_directory(".", "wheel.html")
 
 
 @app.route("/claim", methods=["POST"])
@@ -131,7 +134,7 @@ def claim():
 
     photo_id = None
 
-    # If we have screenshot, decode + send photo to user now (and remember file_id)
+    # បើមាន screenshot -> ផ្ញើរូបទៅ user ហើយសរសេរកូដ file_id ទុក
     if image_data_url and image_data_url.startswith("data:image"):
         try:
             header, b64 = image_data_url.split(",", 1)
@@ -150,7 +153,7 @@ def claim():
             log.exception("Failed to decode/send screenshot: %s", e)
 
     # save state
-    user_states[user_id] = {
+    user_states[str(user_id)] = {
         "step": "ask_name",
         "prize": prize,
         "photo_id": photo_id,
@@ -184,11 +187,10 @@ def handle_update(update: dict):
         send_start_message(chat_id)
         return
 
-    # only handle text messages for claim flow
     if not isinstance(text, str):
         return
 
-    state = user_states.get(user_id)
+    state = user_states.get(str(user_id))
     if not state:
         return  # no active claim
 
@@ -233,7 +235,7 @@ def handle_update(update: dict):
             ),
         )
 
-        # send report to group
+        # report to group
         report = (
             "🎁 <b>New Prize Claim</b>\n\n"
             f"📅 <b>Date/Time (Bangkok)</b>: {now_str}\n"
@@ -245,14 +247,13 @@ def handle_update(update: dict):
         if username:
             report += f"📛 <b>Username</b>: @{username}\n"
 
-        # with screenshot if available
         if photo_id:
             send_photo(TARGET_GROUP_ID, photo_id, caption=report)
         else:
             send_message(TARGET_GROUP_ID, report)
 
         # cleanup
-        user_states.pop(user_id, None)
+        user_states.pop(str(user_id), None)
 
 
 def run_bot_loop():
@@ -282,8 +283,6 @@ def run_bot_loop():
 
 if __name__ == "__main__":
     # Railway: run Flask + polling in same process using threads
-    from threading import Thread
-
     Thread(target=run_bot_loop, daemon=True).start()
     log.info("🌐 Flask running on port 8080")
     app.run(host="0.0.0.0", port=8080)
