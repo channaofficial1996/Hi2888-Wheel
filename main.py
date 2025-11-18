@@ -48,8 +48,12 @@ def send_message(chat_id, text, parse_mode=None):
 
 
 def send_start_message(chat_id: int):
-    # add version param to break Telegram WebApp cache
-    wheel_url = f"{WEBAPP_URL}/wheel?v=41"
+    # OLD:
+    # wheel_url = f"{WEBAPP_URL}/wheel?v=41"
+
+    # NEW: ផ្ញើ chat id ទៅក្នុង URL
+    wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=42"
+
     text = (
         "🎰 សូមស្វាគមន៍មកកាន់កង់រង្វាន់!\n"
         "ចុចប៊ូតុងខាងក្រោមដើម្បី Spin Wheel 🎯"
@@ -62,6 +66,7 @@ def send_start_message(chat_id: int):
             }
         ]]
     }
+    ...
     try:
         r = requests.post(
             f"{API_URL}/sendMessage",
