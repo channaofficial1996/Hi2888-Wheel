@@ -1,4 +1,5 @@
 import os
+import asyncio
 import threading
 
 from flask import Flask, send_from_directory
@@ -21,47 +22,36 @@ if not WEBAPP_URL:
 # ========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send button to open spin wheel WebApp."""
     wheel_url = f"{WEBAPP_URL}/wheel"
 
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                text="🎰 Open Spin Wheel",
-                web_app=WebAppInfo(url=wheel_url)
-            )
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    keyboard = [[InlineKeyboardButton(
+        text="🎰 Open Spin Wheel",
+        web_app=WebAppInfo(url=wheel_url)
+    )]]
 
     await update.message.reply_text(
-        "Welcome! 🎉\nClick the button below to open the spin wheel.",
-        reply_markup=reply_markup,
+        "Welcome! 🎉\nClick below to try your luck!",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 
-def run_bot():
-    """Run Telegram bot with polling."""
+async def run_bot():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", start))
-    application.run_polling()
+    await application.run_polling()
 
 
 # ========================
-# FLASK APP (for Railway & WebApp)
+# FLASK SERVER
 # ========================
-
 flask_app = Flask(__name__)
-
 
 @flask_app.route("/")
 def index():
     return "Spin Wheel Telegram Bot is running ✅"
 
-
 @flask_app.route("/wheel")
 def wheel_page():
-    # Serve the wheel.html file from current directory
     return send_from_directory(".", "wheel.html")
 
 
@@ -73,11 +63,6 @@ def run_flask():
 # ========================
 # MAIN ENTRY
 # ========================
-
 if __name__ == "__main__":
-    # Run bot in background thread
-    bot_thread = threading.Thread(target=run_bot, daemon=True)
-    bot_thread.start()
-
-    # Run Flask (main thread – for Railway)
-    run_flask()
+    threading.Thread(target=run_flask).start()
+    asyncio.run(run_bot())
