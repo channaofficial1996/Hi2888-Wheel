@@ -273,29 +273,64 @@ def handle_update(update: dict):
         return
 
     # ----- STEP 2: Ask phone -----
-    if step == "ask_phone":
-        phone = text.strip()
-        if not phone:
-            send_message(chat_id, "📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទម្តងទៀត។")
-            return
+if step == "ask_phone":
+    phone = text.strip()
+    if not phone:
+        send_message(chat_id, "📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទម្តងទៀត។")
+        return
 
-        state["phone"] = phone
-        state["step"] = "done"
+    state["phone"] = phone
+    state["step"] = "done"
 
-        prize = state.get("prize", "-")
-        photo_id = state.get("photo_id")
-        username = from_user.get("username")
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    prize = state.get("prize", "-")
+    photo_id = state.get("photo_id")
+    username = from_user.get("username")
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Confirm to user
-        send_message(
-            chat_id,
-            "🎉 <b>បញ្ជាក់ទទួលបានរង្វាន់ជោគជ័យ!</b>\n\n"
-            f"🎁 Prize: <b>{prize}</b>\n"
-            f"👤 Name: <b>{state['full_name']}</b>\n"
-            f"📞 Phone: <b>{phone}</b>\n\n"
-            "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ ❤️",
-        )
+    # ========== FINAL CONFIRM MESSAGE WITH CONTACT BUTTONS ==========
+    final_text = (
+        "🎉 <b>បញ្ជាក់ទទួលបានរង្វាន់ជោគជ័យ!</b>\n\n"
+        f"🎁 Prize: <b>{prize}</b>\n"
+        f"👤 Name: <b>{state['full_name']}</b>\n"
+        f"📞 Phone: <b>{phone}</b>\n\n"
+        "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ ❤️\n"
+        "បើចង់ទាក់ទងភ្នាក់ងារទាន់ចិត្ត៖"
+    )
+
+    contact_keyboard = {
+        "inline_keyboard": [
+            [
+                {"text": "💬 Telegram", "url": "https://t.me/chana_on"},
+                {"text": "📩 Messenger", "url": "https://m.me/your_page_here"},
+            ]
+        ]
+    }
+
+    send_message(chat_id, final_text, reply_markup=contact_keyboard)
+
+    # Report message to group (plain text caption)
+    report_lines = [
+        "🎁 New Prize Claim",
+        "",
+        f"📅 Date/Time (Bangkok): {now_str}",
+        f"🆔 User ID: {user_id_str}",
+        f"👤 Full name: {state['full_name']}",
+        f"📞 Phone: {phone}",
+        f"🎯 Prize: {prize}",
+    ]
+    if username:
+        report_lines.append(f"📛 Username: @{username}")
+
+    report = "\n".join(report_lines)
+
+    if photo_id:
+        send_photo(TARGET_GROUP_ID, photo_id, caption=report)
+    else:
+        send_message(TARGET_GROUP_ID, report, parse_html=False)
+
+    # Clear state
+    user_states.pop(user_id_str, None)
+    return
 
         # Report message to group (plain text caption)
         report_lines = [
