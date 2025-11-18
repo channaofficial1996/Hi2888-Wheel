@@ -1,4 +1,4 @@
-# main.py  — 2888 Wheel (final v5)
+# main.py  — 2888 Wheel v4.2
 # - Flask run on port 8080
 # - /wheel serve wheel.html
 # - /claim ពី WebApp -> bot DM (Name, Phone) -> report ទៅ group
@@ -29,9 +29,9 @@ if not TARGET_GROUP_ID:
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("wheelbot-final")
+log = logging.getLogger("wheelbot-v4-2")
 
-# user_id -> state data
+# user_id (str) -> state data
 user_states = {}  # { user_id: {"step": "...", "prize": "...", "photo_id": "..."} }
 
 # --------- Telegram helpers ---------
@@ -63,9 +63,11 @@ def send_message(chat_id, text, reply_markup=None):
 
 
 def send_photo(chat_id, photo, caption=None):
-    """photo can be file_id (str) or BytesIO."""
+    """
+    photo អាចជា file_id (str) ឬ BytesIO.
+    នៅទីនេះយើងមិនប្រើ HTML tag ក្នុង caption ដូច្នេះ parse_mode មិនចាំបាច់។
+    """
     if isinstance(photo, str) and not hasattr(photo, "read"):
-        # existing file_id
         return tg_request(
             "sendPhoto",
             {"chat_id": chat_id, "photo": photo, "caption": caption or ""},
@@ -106,10 +108,10 @@ app = Flask(__name__)
 
 @app.route("/")
 def index():
-    return "Spin Wheel Telegram Bot is running ✅"
+    return "Spin Wheel Telegram Bot v4.2 is running ✅"
 
 
-# 👉 serve wheel.html ដោយផ្ទាល់ (wheel.html នៅគន្លងដូច main.py)
+# serve wheel.html (ដាក់ wheel.html នៅថតដូច main.py)
 @app.route("/wheel")
 def wheel_page():
     return send_from_directory(".", "wheel.html")
@@ -130,21 +132,23 @@ def claim():
         log.error("/claim without user_id: %s", data)
         return jsonify({"ok": False, "error": "missing user_id"}), 400
 
-    log.info("Received claim from %s: %s", user_id, prize)
+    user_id_str = str(user_id)
+    log.info("Received claim from %s: %s", user_id_str, prize)
 
     photo_id = None
 
-    # បើមាន screenshot -> ផ្ញើរូបទៅ user ហើយសរសេរកូដ file_id ទុក
+    # បើមាន screenshot -> ផ្ញើរូបទៅ user ហើយរក file_id
     if image_data_url and image_data_url.startswith("data:image"):
         try:
             header, b64 = image_data_url.split(",", 1)
             img_bytes = base64.b64decode(b64)
             bio = BytesIO(img_bytes)
             bio.name = "wheel.png"
+            # caption សាមញ្ញ គ្មាន <b> tag
             resp = send_photo(
                 user_id,
                 bio,
-                caption=f"🎰 លទ្ធផលកង់រង្វាន់របស់អ្នក:\n<b>{prize}</b>",
+                caption=f"🎰 លទ្ធផលកង់រង្វាន់របស់អ្នក:\n{prize}",
             )
             if resp and resp.get("ok"):
                 photo_list = resp["result"]["photo"]
@@ -152,19 +156,19 @@ def claim():
         except Exception as e:
             log.exception("Failed to decode/send screenshot: %s", e)
 
-    # save state
-    user_states[str(user_id)] = {
+    # save state (ជំហាន ១: សួរ​ឈ្មោះ)
+    user_states[user_id_str] = {
         "step": "ask_name",
         "prize": prize,
         "photo_id": photo_id,
         "created_at": time.time(),
     }
 
-    # ask name
+    # ask name (message ដាច់ពីគេ)
     send_message(
         user_id,
-        "🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់ <b>{}</b> 🎁\n\n"
-        "សូមបញ្ចូល <b>ឈ្មោះពេញ</b> របស់អ្នក៖".format(prize),
+        "🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់៖ <b>{}</b> 🎁\n\n"
+        "✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> របស់អ្នក។".format(prize),
     )
 
     return jsonify({"ok": True})
@@ -181,6 +185,7 @@ def handle_update(update: dict):
     text = msg.get("text", "")
     from_user = msg.get("from", {})
     user_id = from_user.get("id")
+    user_id_str = str(user_id)
 
     # commands
     if text == "/start":
@@ -190,7 +195,7 @@ def handle_update(update: dict):
     if not isinstance(text, str):
         return
 
-    state = user_states.get(str(user_id))
+    state = user_states.get(user_id_str)
     if not state:
         return  # no active claim
 
@@ -200,15 +205,16 @@ def handle_update(update: dict):
     if step == "ask_name":
         full_name = text.strip()
         if not full_name:
-            send_message(chat_id, "សូមបញ្ចូល <b>ឈ្មោះពេញ</b> ម្ដងទៀត 🙏")
+            send_message(chat_id, "សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> ម្ដងទៀត 🙏")
             return
+
         state["full_name"] = full_name
         state["step"] = "ask_phone"
+
         send_message(
             chat_id,
-            "✅ បានឈ្មោះ៖ <b>{}</b>\n\nសូមបន្តបញ្ចូល <b>លេខទូរស័ព្ទ</b> របស់អ្នក៖".format(
-                full_name
-            ),
+            "✅ បានឈ្មោះ៖ <b>{}</b>\n\n"
+            "📞 សូមបញ្ចូល <b>លេខទូរស័ព្ទ</b> របស់អ្នក។".format(full_name),
         )
         return
 
@@ -227,33 +233,34 @@ def handle_update(update: dict):
         send_message(
             chat_id,
             "🎉 <b>បញ្ជាក់ជោគជ័យ!</b>\n\n"
-            "ឈ្មោះ៖ <b>{}</b>\n"
-            "លេខទូរស័ព្ទ៖ <b>{}</b>\n"
-            "រង្វាន់៖ <b>{}</b>\n\n"
-            "សូមរង់ចាំភ្នាក់ងារ ទាក់ទងមកវិញ ❤️".format(
-                state["full_name"], phone, prize
+            "🎁 Prize: <b>{}</b>\n"
+            "👤 Name: <b>{}</b>\n"
+            "📞 Phone: <b>{}</b>\n\n"
+            "សូមរង់ចាំភ្នាក់ងារ ទាក់ទងមកវិញ ❤".format(
+                prize, state["full_name"], phone
             ),
         )
 
-        # report to group
+        # report to group (គ្មាន HTML tag ដើម្បីប្រើបានទោះបីជា photo caption)
         report = (
-            "🎁 <b>New Prize Claim</b>\n\n"
-            f"📅 <b>Date/Time (Bangkok)</b>: {now_str}\n"
-            f"🆔 <b>User ID</b>: <code>{user_id}</code>\n"
-            f"👤 <b>Full name</b>: {state['full_name']}\n"
-            f"📞 <b>Phone</b>: {phone}\n"
-            f"🎯 <b>Prize</b>: {prize}\n"
+            "🎁 New Prize Claim\n\n"
+            f"📅 Date/Time (Bangkok): {now_str}\n"
+            f"🆔 User ID: {user_id_str}\n"
+            f"👤 Full name: {state['full_name']}\n"
+            f"📞 Phone: {phone}\n"
+            f"🎯 Prize: {prize}\n"
         )
         if username:
-            report += f"📛 <b>Username</b>: @{username}\n"
+            report += f"📛 Username: @{username}\n"
 
+        # បើមាន screenshot -> ផ្ញើរូប + caption report, បើមិនមាន -> sendMessage
         if photo_id:
             send_photo(TARGET_GROUP_ID, photo_id, caption=report)
         else:
             send_message(TARGET_GROUP_ID, report)
 
         # cleanup
-        user_states.pop(str(user_id), None)
+        user_states.pop(user_id_str, None)
 
 
 def run_bot_loop():
