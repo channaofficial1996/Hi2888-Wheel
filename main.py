@@ -137,6 +137,17 @@ def claim():
         return jsonify({"ok": False, "error": "missing user_id"}), 400
 
     uid = str(user_id)
+
+    # Try Again => no name/phone
+    if prize and prize.lower().strip() == "try again":
+        send_message(
+            user_id,
+            "🏁 លទ្ធផលរង្វាន់៖ <b>Try Again</b>\n\n"
+            "សូមសាកល្បងម្ដងទៀត nhé! 🍀",
+        )
+        return jsonify({"ok": True})
+
+    # Rate limit checking
     ok, msg = check_rate_limit(uid)
     if not ok:
         send_message(user_id, msg, parse_html=False)
@@ -160,10 +171,10 @@ def claim():
 
     send_message(
         user_id,
-        f"🎉 អបអរសាទរ! អ្នកបានទទួលរង្វាន់: <b>{prize}</b>\n\n✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b>។",
+        f"🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់: <b>{prize}</b> 🎁\n\n"
+        "✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b>។",
     )
     return jsonify({"ok": True})
-
 
 # ---------- Telegram Poll ----------
 def handle_update(update: dict):
