@@ -194,6 +194,10 @@
     : null;
   if (tg) tg.expand();
 
+  // 🔹 អាន chat_id ពី URL (?cid=...)
+  const params = new URLSearchParams(window.location.search);
+  const cidFromUrl = params.get("cid"); // e.g. 5529...
+
   // build wheel
   prizes.forEach((text, i) => {
     const seg = document.createElement("div");
@@ -250,8 +254,12 @@
       // ✅ AUTO SEND CLAIM TO BOT
       statusEl.textContent = "Sending to bot...";
       autoClaim()
-        .then(() => {
-          statusEl.textContent = "✅ Sent! Please check the chat.";
+        .then((ok) => {
+          if (ok) {
+            statusEl.textContent = "✅ Sent! Please check the chat.";
+          } else {
+            statusEl.textContent = "❌ Failed to send, please try again.";
+          }
         })
         .catch((err) => {
           console.error("Claim error:", err);
@@ -277,15 +285,21 @@
   };
 
   function autoClaim() {
-    const user = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+    const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
 
-    // even if user is null, still send (backend will log error instead of hanging)
+    // 🔹 Priority: cid from URL (chat_id), fallback to WebApp user.id
+    const userId = cidFromUrl || (webUser && webUser.id) || null;
+
     const basePayload = {
       prize: currentPrize,
-      user_id: user ? user.id : null
+      user_id: userId,
     };
 
-    // Try with screenshot first
+    // បើ userId មិនមាន ទុកឲ្យ server error 400 (log) ដើម្បីកុំឲ្យបាត់បង់បញ្ហា
+    if (!userId) {
+      console.warn("No user_id/cid found, cannot send claim correctly.");
+    }
+
     if (window.html2canvas) {
       return html2canvas(document.getElementById("wheel-wrapper"))
         .then(canvas => {
@@ -298,22 +312,21 @@
             body: JSON.stringify(payload)
           });
         })
+        .then(r => r && r.ok)
         .catch(err => {
           console.error("Screenshot failed, fallback:", err);
-          // fallback without image
           return fetch("/claim", {
             method: "POST",
             headers: {"Content-Type":"application/json"},
             body: JSON.stringify(basePayload)
-          });
+          }).then(r => r && r.ok);
         });
     } else {
-      // no html2canvas -> send text only
       return fetch("/claim", {
         method: "POST",
         headers: {"Content-Type":"application/json"},
         body: JSON.stringify(basePayload)
-      });
+      }).then(r => r && r.ok);
     }
   }
 </script>
