@@ -6,26 +6,33 @@ import base64
 from datetime import datetime, timedelta
 
 import requests
-from flask import Flask, send_from_directory, request
+from flask import Flask, send_from_directory, request, jsonify
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("wheelbot-lite")
+log = logging.getLogger("wheelbot-v4.1")
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBAPP_URL = os.getenv("WEBAPP_URL")  # e.g. https://web-production-f91a3.up.railway.app
-TARGET_GROUP_ID = os.getenv("TARGET_GROUP_ID")  # e.g. -1003317283401
+TARGET_GROUP_ID_ENV = os.getenv("TARGET_GROUP_ID")  # e.g. -1003317283401
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN is not set")
 if not WEBAPP_URL:
     raise RuntimeError("WEBAPP_URL is not set")
-if not TARGET_GROUP_ID:
+if not TARGET_GROUP_ID_ENV:
     raise RuntimeError("TARGET_GROUP_ID is not set")
+
+try:
+    TARGET_GROUP_ID = int(TARGET_GROUP_ID_ENV.strip())
+except ValueError:
+    TARGET_GROUP_ID = TARGET_GROUP_ID_ENV.strip()
 
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
-# user state memory
+# In-memory user states: chat_id -> dict
 USER_STATES = {}
+
+app = Flask(__name__)
 
 
 def send_message(chat_id, text, parse_mode=None):
@@ -40,21 +47,29 @@ def send_message(chat_id, text, parse_mode=None):
         log.exception("Error sending message")
 
 
-def send_start(chat_id: int):
-    wheel_url = f"{WEBAPP_URL}/wheel?v=4"   # force Telegram WebApp refresh
+def send_start_message(chat_id: int):
+    # add version param to break Telegram WebApp cache
+    wheel_url = f"{WEBAPP_URL}/wheel?v=41"
     text = (
         "🎰 សូមស្វាគមន៍មកកាន់កង់រង្វាន់!\n"
-        "ចុចប៊ូតុងខាងក្រោមដើម្បី SPIN 🎯"
+        "ចុចប៊ូតុងខាងក្រោមដើម្បី Spin Wheel 🎯"
     )
     reply_markup = {
         "inline_keyboard": [[
-            {"text": "🎰 Open Spin Wheel", "web_app": {"url": wheel_url}}
+            {
+                "text": "🎰 Open Spin Wheel",
+                "web_app": {"url": wheel_url},
+            }
         ]]
     }
     try:
         r = requests.post(
             f"{API_URL}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "reply_markup": reply_markup},
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "reply_markup": reply_markup,
+            },
             timeout=10,
         )
         if not r.ok:
@@ -64,7 +79,7 @@ def send_start(chat_id: int):
 
 
 def polling_loop():
-    log.info("🚀 Bot polling started…")
+    log.info("🚀 Bot polling loop started")
     offset = None
     while True:
         try:
@@ -74,139 +89,200 @@ def polling_loop():
                 timeout=60,
             )
             if not r.ok:
-                time.sleep(4)
+                log.error("getUpdates failed: %s", r.text)
+                time.sleep(5)
                 continue
 
             data = r.json()
-            for upd in data.get("result", []):
-                offset = upd["update_id"] + 1
-                msg = upd.get("message")
-                if not msg:
+            if not data.get("ok"):
+                log.error("getUpdates not ok: %s", data)
+                time.sleep(5)
+                continue
+
+            for update in data.get("result", []):
+                offset = update["update_id"] + 1
+
+                message = update.get("message")
+                if not message:
                     continue
 
-                chat_id = msg["chat"]["id"]
-                text = (msg.get("text") or "").strip()
-                username = msg["chat"].get("username")
+                chat = message.get("chat") or {}
+                chat_id = chat.get("id")
+                if not chat_id:
+                    continue
 
-                # state machine
+                text = (message.get("text") or "").strip()
+                from_user = message.get("from") or {}
+                username = from_user.get("username")
+
                 state = USER_STATES.get(chat_id)
 
-                if state:
+                # Handle form flow if user is in state
+                if state and text:
                     stage = state.get("stage")
 
-                    # waiting full name
-                    if stage == "name":
+                    # 1) waiting for full name
+                    if stage == "waiting_name":
                         state["name"] = text
-                        state["stage"] = "phone"
-                        send_message(chat_id, "📞 សូមបញ្ចូលលេខទូរស័ព្ទរបស់អ្នក")
+                        state["stage"] = "waiting_phone"
+                        send_message(
+                            chat_id,
+                            "📞 សូមបញ្ចូលលេខទូរស័ព្ទរបស់អ្នក។"
+                        )
                         continue
 
-                    # waiting phone
-                    if stage == "phone":
+                    # 2) waiting for phone
+                    if stage == "waiting_phone":
                         state["phone"] = text
+                        prize = state.get("prize", "Unknown prize")
+                        name = state.get("name", "-")
+                        phone = state.get("phone", "-")
+                        file_id = state.get("file_id")
 
+                        # confirm to user
+                        confirm = (
+                            "🎉 បញ្ចប់ការបំពេញព័ត៌មាន!\n"
+                            "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ 🙏\n\n"
+                            f"🎁 Prize: {prize}\n"
+                            f"👤 Name: {name}\n"
+                            f"📞 Phone: {phone}"
+                        )
+                        send_message(chat_id, confirm)
+
+                        # send to group
                         now_bkk = datetime.utcnow() + timedelta(hours=7)
-                        dt = now_bkk.strftime("%Y-%m-%d %H:%M:%S")
-
-                        prize = state.get("prize")
-                        uname = f"@{username}" if username else "-"
+                        dt_str = now_bkk.strftime("%Y-%m-%d %H:%M:%S")
+                        uname_str = f"@{username}" if username else "-"
 
                         summary = (
-                            f"📅 DATE/TIME (Bangkok): {dt}\n"
-                            f"🆔 ID: {chat_id}\n"
-                            f"👤 Full name: {state['name']}\n"
-                            f"📛 Username: {uname}\n"
-                            f"📞 Phone: {state['phone']}\n"
-                            f"🎁 Prize: {prize}"
+                            f"🎁 *New Prize Claim*\n\n"
+                            f"📅 DATE/TIME (Bangkok): `{dt_str}`\n"
+                            f"🆔 ID: `{chat_id}`\n"
+                            f"👤 Full name: *{name}*\n"
+                            f"📛 Username: {uname_str}\n"
+                            f"📞 Phone: `{phone}`\n"
+                            f"🎯 Prize: *{prize}*"
                         )
 
-                        # send to user
-                        send_message(chat_id, "🎉 បញ្ចប់ការចុះឈ្មោះ! សូមរង់ចាំភ្នាក់ងារទាក់ទង 🙏")
-
-                        # forward to group
                         try:
-                            file_id = state.get("file_id")
                             if file_id:
-                                requests.post(
+                                r3 = requests.post(
                                     f"{API_URL}/sendPhoto",
                                     json={
                                         "chat_id": TARGET_GROUP_ID,
                                         "photo": file_id,
                                         "caption": summary,
+                                        "parse_mode": "Markdown",
                                     },
-                                    timeout=30
+                                    timeout=30,
                                 )
                             else:
-                                requests.post(
+                                r3 = requests.post(
                                     f"{API_URL}/sendMessage",
-                                    json={"chat_id": TARGET_GROUP_ID, "text": summary},
-                                    timeout=30
+                                    json={
+                                        "chat_id": TARGET_GROUP_ID,
+                                        "text": summary,
+                                        "parse_mode": "Markdown",
+                                    },
+                                    timeout=30,
                                 )
+                            if not r3.ok:
+                                log.error("send to group failed: %s", r3.text)
                         except Exception:
-                            log.exception("Failed sending lead to group")
+                            log.exception("Error sending to group")
 
                         USER_STATES.pop(chat_id, None)
                         continue
 
-                # no state → command handling
+                # No active state: handle /start
                 if text == "/start":
-                    send_start(chat_id)
+                    send_start_message(chat_id)
+                    continue
+
         except Exception:
-            time.sleep(4)
-
-
-app = Flask(__name__)
+            log.exception("Error in polling loop")
+            time.sleep(5)
 
 
 @app.route("/")
 def index():
-    return "Spin Wheel Bot Lite v4 is running ✅"
+    return "Spin Wheel Telegram Bot v4.1 is running ✅"
 
 
 @app.route("/wheel")
-def wheel_page():
+def wheel():
     return send_from_directory(".", "wheel.html")
 
 
 @app.route("/claim", methods=["POST"])
 def claim():
     data = request.get_json(force=True, silent=True) or {}
-    image = data.get("image")
-    prize = data.get("prize", "Unknown Prize")
+    log.info("Received /claim: %s", data)
+
     user_id = data.get("user_id")
+    prize = data.get("prize", "Unknown prize")
+    image_data = data.get("image")  # may be None for fallback
 
-    if not user_id or not image:
-        return {"ok": False}, 400
+    if user_id is None:
+        return jsonify({"ok": False, "error": "missing user_id"}), 400
 
-    chat_id = int(user_id)
-
-    # decode screenshot
-    base64data = image.split("base64,")[-1]
-    img_bytes = base64.b64decode(base64data)
-
-    resp = requests.post(
-        f"{API_URL}/sendPhoto",
-        data={"chat_id": chat_id, "caption": f"🎯 Prize: {prize}"},
-        files={"photo": ("wheel.png", img_bytes)},
-        timeout=30
-    )
+    try:
+        chat_id = int(user_id)
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "bad user_id"}), 400
 
     file_id = None
-    try:
-        photos = resp.json()["result"]["photo"]
-        file_id = photos[-1]["file_id"]
-    except:
-        pass
 
+    # Try to decode screenshot if present (primary flow)
+    if image_data:
+        try:
+            prefix = "base64,"
+            idx = image_data.find(prefix)
+            if idx != -1:
+                b64_data = image_data[idx + len(prefix):]
+            else:
+                # assume full dataURL or plain base64
+                if "," in image_data:
+                    b64_data = image_data.split(",", 1)[1]
+                else:
+                    b64_data = image_data
+            img_bytes = base64.b64decode(b64_data)
+
+            files = {"photo": ("wheel.png", img_bytes)}
+            caption = f"🎯 Prize: {prize}"
+
+            resp = requests.post(
+                f"{API_URL}/sendPhoto",
+                data={"chat_id": chat_id, "caption": caption},
+                files=files,
+                timeout=30,
+            )
+            if resp.ok:
+                try:
+                    photos = resp.json()["result"]["photo"]
+                    file_id = photos[-1]["file_id"]
+                except Exception:
+                    file_id = None
+            else:
+                log.error("sendPhoto to user failed: %s", resp.text)
+        except Exception:
+            log.exception("Failed to decode or send screenshot, falling back to text only")
+
+    # Setup user state regardless of screenshot success
     USER_STATES[chat_id] = {
-        "stage": "name",
+        "stage": "waiting_name",
         "prize": prize,
         "file_id": file_id,
     }
 
-    send_message(chat_id, f"🎉 អបអរសាទរ! អ្នកបានឈ្នះ *{prize}*\n\n✍️ សូមផ្ញើឈ្មោះពេញរបស់អ្នក", parse_mode="Markdown")
+    # Ask for full name (Khmer)
+    msg = (
+        f"🎉 អបអរសាទរ! អ្នកបានឈ្នះរង្វាន់: *{prize}*\n\n"
+        "✍️ សូមផ្ញើឈ្មោះពេញរបស់អ្នកមកខ្ញុំ។"
+    )
+    send_message(chat_id, msg, parse_mode="Markdown")
 
-    return {"ok": True}
+    return jsonify({"ok": True})
 
 
 def run_flask():
