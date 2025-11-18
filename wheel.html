@@ -19,9 +19,8 @@
       justify-content: center;
       gap: 8px;
     }
-    #emoji {
-      font-size: 26px;
-    }
+    #emoji { font-size: 26px; }
+
     #pointer {
       width: 0;
       height: 0;
@@ -30,11 +29,12 @@
       border-bottom: 30px solid #e53935;
       margin: 10px auto;
     }
+
     #wheel-wrapper {
       position: relative;
       width: 280px;
       height: 280px;
-      margin: 10px auto 20px;
+      margin: 10px auto 12px;
     }
     #wheel {
       width: 100%;
@@ -43,7 +43,7 @@
       border: 6px solid #333;
       position: relative;
       overflow: hidden;
-      background: white;
+      background: #ffffff;
       transition: transform 4s cubic-bezier(.17,.67,.32,1.34);
     }
     .segment {
@@ -62,13 +62,10 @@
       padding: 4px;
       box-sizing: border-box;
     }
-    .segment:nth-child(odd) {
-      background: #42a5f5;
-    }
-    .segment:nth-child(even) {
-      background: #66bb6a;
-    }
+    .segment:nth-child(odd)  { background:#42a5f5; }
+    .segment:nth-child(even) { background:#66bb6a; }
 
+    /* big center result */
     #center-result {
       position: absolute;
       inset: 25%;
@@ -91,17 +88,55 @@
       transform: scale(1);
       pointer-events: auto;
     }
-    #center-result .label {
-      font-size: 12px;
-      opacity: 0.8;
-      margin-bottom: 4px;
+    #center-result .label { font-size: 12px; opacity: 0.8; margin-bottom: 4px; }
+    #center-result .prize-text { font-size: 18px; font-weight: 700; text-align: center; }
+
+    /* buttons */
+    #spinBtn {
+      padding: 12px 30px;
+      font-size: 16px;
+      border-radius: 999px;
+      border: none;
+      background: #ff9800;
+      color: #fff;
+      cursor: pointer;
+      min-width: 140px;
     }
-    #center-result .prize-text {
-      font-size: 18px;
-      font-weight: 700;
-      text-align: center;
+    #spinBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+    .bottom-row {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 12px;
+    }
+    .btn {
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+      min-width: 140px;
+      color: #fff;
+    }
+    #claimBtn {
+      background: #4caf50;
+    }
+    #claimBtn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    #agentBtn {
+      background: #1976d2;
     }
 
+    #result {
+      margin-top: 10px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    /* confetti */
     #celebrate {
       position: fixed;
       inset: 0;
@@ -119,37 +154,14 @@
       from { transform: translateY(-40px) rotate(0deg); opacity: 1; }
       to   { transform: translateY(120vh) rotate(360deg); opacity: 0; }
     }
-
-    #spinBtn {
-      padding: 12px 30px;
-      font-size: 16px;
-      border-radius: 999px;
-      border: none;
-      background: #ff9800;
-      color: #fff;
-      cursor: pointer;
-      margin-top: 8px;
-      min-width: 140px;
-    }
-    #spinBtn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
-    #result {
-      margin-top: 10px;
-      font-size: 14px;
-      font-weight: 500;
-    }
   </style>
 </head>
 <body>
-  <h2><span id="emoji">🎰</span> <span>Spin & Win</span></h2>
+  <h2><span id="emoji">🎰</span><span>Spin & Win</span></h2>
   <div id="pointer"></div>
 
   <div id="wheel-wrapper">
     <div id="wheel"></div>
-
     <div id="center-result">
       <div class="label">You won</div>
       <div class="prize-text" id="centerPrize">-</div>
@@ -158,9 +170,14 @@
 
   <button id="spinBtn">SPIN</button>
 
+  <div class="bottom-row">
+    <button id="claimBtn" class="btn" disabled>✅ Claim Prize</button>
+    <button id="agentBtn" class="btn">💬 Contact Agent</button>
+  </div>
+
   <p id="result"></p>
 
-  <!-- html2canvas for screenshot -->
+  <!-- screenshot lib -->
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
   <script>
@@ -176,6 +193,8 @@
     const wheel = document.getElementById("wheel");
     const result = document.getElementById("result");
     const spinBtn = document.getElementById("spinBtn");
+    const claimBtn = document.getElementById("claimBtn");
+    const agentBtn = document.getElementById("agentBtn");
     const center = document.getElementById("center-result");
     const centerPrize = document.getElementById("centerPrize");
 
@@ -183,13 +202,12 @@
     let currentRotation = 0;
     let spinning = false;
     let currentPrize = null;
+    let claiming = false;
 
     const tg = window.Telegram && window.Telegram.WebApp
       ? window.Telegram.WebApp
       : null;
-    if (tg) {
-      tg.expand();
-    }
+    if (tg) tg.expand();
 
     // build wheel
     prizes.forEach((text, i) => {
@@ -218,15 +236,14 @@
         celebrate.appendChild(span);
       }
 
-      setTimeout(() => {
-        celebrate.remove();
-      }, 2000);
+      setTimeout(() => celebrate.remove(), 2000);
     }
 
     spinBtn.onclick = () => {
       if (spinning) return;
       spinning = true;
       spinBtn.disabled = true;
+      claimBtn.disabled = true;
       result.textContent = "";
       center.classList.remove("show");
 
@@ -242,61 +259,84 @@
         const prize = prizes[randIndex];
         currentPrize = prize;
 
-        setTimeout(() => {
-          centerPrize.textContent = prize;
-          center.classList.add("show");
-          result.textContent = "You won: " + prize + " 🎉";
+        centerPrize.textContent = prize;
+        center.classList.add("show");
+        result.textContent = "You won: " + prize + " 🎉";
 
-          showCelebrate();
-          sendClaim();
-        }, 150);
+        showCelebrate();
+        // enable claim button
+        claimBtn.disabled = false;
 
         spinning = false;
         spinBtn.disabled = false;
       }, 4000);
     };
 
-    function sendClaim() {
-      if (!currentPrize) return;
+    claimBtn.onclick = () => {
+      if (!currentPrize || claiming) return;
+      claiming = true;
+      claimBtn.disabled = true;
+      claimBtn.textContent = "Sending...";
 
+      sendClaim()
+        .then(() => {
+          alert("Claim sent: " + currentPrize);
+          if (tg) tg.close();
+        })
+        .catch((err) => {
+          console.error("Claim error:", err);
+          alert("Claim failed, please try again.");
+          claimBtn.disabled = false;
+          claimBtn.textContent = "✅ Claim Prize";
+          claiming = false;
+        });
+    };
+
+    // TODO: change to your real agent link
+    const agentUrl = "https://t.me/chana_on";
+    agentBtn.onclick = () => {
+      if (tg && tg.openTelegramLink) {
+        tg.openTelegramLink(agentUrl);
+      } else {
+        window.open(agentUrl, "_blank");
+      }
+    };
+
+    function sendClaim() {
       const user = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
       const basePayload = {
         prize: currentPrize,
         user_id: user ? user.id : null,
       };
 
+      // with screenshot
       if (window.html2canvas) {
-        html2canvas(document.getElementById("wheel-wrapper")).then(canvas => {
-          const dataUrl = canvas.toDataURL("image/png");
-          const payload = Object.assign({}, basePayload, { image: dataUrl });
+        return html2canvas(document.getElementById("wheel-wrapper"))
+          .then(canvas => {
+            const dataUrl = canvas.toDataURL("image/png");
+            const payload = Object.assign({}, basePayload, { image: dataUrl });
 
-          return fetch("/claim", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(payload),
+            return fetch("/claim", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify(payload),
+            });
+          })
+          .catch(err => {
+            console.error("html2canvas failed, fallback:", err);
+            // fallback without image
+            return fetch("/claim", {
+              method: "POST",
+              headers: {"Content-Type": "application/json"},
+              body: JSON.stringify(basePayload),
+            });
           });
-        }).then(r => {
-          if (!r.ok) throw new Error("Claim failed");
-          if (tg) tg.close();
-        }).catch(err => {
-          console.error("Claim with screenshot failed, fallback:", err);
-          // fallback: send without image
-          fetch("/claim", {
-            method: "POST",
-            headers: {"Content-Type": "application/json"},
-            body: JSON.stringify(basePayload),
-          }).finally(() => {
-            if (tg) tg.close();
-          });
-        });
       } else {
-        // no html2canvas -> fallback to text only
-        fetch("/claim", {
+        // no html2canvas -> text only
+        return fetch("/claim", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify(basePayload),
-        }).finally(() => {
-          if (tg) tg.close();
         });
       }
     }
