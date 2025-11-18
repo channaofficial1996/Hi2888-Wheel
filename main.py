@@ -1,14 +1,6 @@
-# main.py — 2888 Wheel v4.2.1 PRO
-# - Flask run on port 8080
-# - /wheel serve wheel.html
-# - /claim ពី WebApp -> DM (Screenshot + Prize + Name + Phone) -> Report ទៅ Group
-#
-# ENV (Railway Variables):
-#   BOT_TOKEN         = "....."
-#   WEBAPP_URL        = "https://web-production-f91a3.up.railway.app"
-#   TARGET_GROUP_ID   = "-1003317283401"
-#   MAX_DAILY_CLAIMS  = "20"         (optional)
-#   MIN_SECONDS_BETWEEN_CLAIMS = "60" (optional)
+# main.py — 2888 Wheel v4.2.2 PRO
+# Flask + Telegram Long Poll + Screenshot Claim
+# Author: ChatGPT PRO Upgrade for Channa 🔥
 
 import os
 import time
@@ -39,14 +31,14 @@ if not TARGET_GROUP_ID:
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("wheelbot-v4-2-1")
+log = logging.getLogger("wheelbot-v4-2-2")
 
-# user_id -> state
-user_states = {}      # វិនិយោគ state សម្រាប់ flow: name -> phone
-# user_id -> counters
-user_limits = {}      # {"last_ts": float, "day": "YYYY-MM-DD", "count": int}
+# Memory states
+user_states = {}      # user_id -> {step, prize, photo_id, full_name, phone}
+user_limits = {}      # user_id -> rate-limit info
 
-# ---------- Telegram helpers ----------
+
+# ---------- Telegram Helper ----------
 def tg_request(method: str, params: dict = None, files: dict = None):
     url = f"{API_URL}/{method}"
     try:
@@ -62,11 +54,8 @@ def tg_request(method: str, params: dict = None, files: dict = None):
         return None
 
 
-def send_message(chat_id, text, reply_markup=None, parse_html: bool = True):
-    params = {
-        "chat_id": chat_id,
-        "text": text,
-    }
+def send_message(chat_id, text, reply_markup=None, parse_html=True):
+    params = {"chat_id": chat_id, "text": text}
     if parse_html:
         params["parse_mode"] = "HTML"
     if reply_markup:
@@ -75,314 +64,218 @@ def send_message(chat_id, text, reply_markup=None, parse_html: bool = True):
 
 
 def send_photo(chat_id, photo, caption=None):
-    """
-    photo អាចជា file_id (str) ឬ BytesIO.
-    Caption នៅទីនេះ យើងមិនប្រើ HTML tag ទេ -> សុទ្ធតែ text សាមញ្ញ។
-    """
     if isinstance(photo, str) and not hasattr(photo, "read"):
-        params = {
-            "chat_id": chat_id,
-            "photo": photo,
-        }
+        params = {"chat_id": chat_id, "photo": photo}
         if caption:
             params["caption"] = caption
         return tg_request("sendPhoto", params)
-    else:
-        files = {"photo": ("wheel.png", photo, "image/png")}
-        params = {"chat_id": chat_id}
-        if caption:
-            params["caption"] = caption
-        return tg_request("sendPhoto", params, files=files)
+
+    files = {"photo": ("wheel.png", photo, "image/png")}
+    params = {"chat_id": chat_id}
+    if caption:
+        params["caption"] = caption
+    return tg_request("sendPhoto", params, files=files)
 
 
 def send_start_message(chat_id: int):
-    wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=4_2_1"
-    text = (
-        "🎰 សូមស្វាគមន៍មកកាន់កម្មវិធីកង់រង្វាន់!\n"
-        "ចុចប៊ូតុងខាងក្រោម ដើម្បីចាប់ផ្តើម SPIN Wheel 🎯"
-    )
-    reply_markup = {
-        "inline_keyboard": [
-            [
-                {
-                    "text": "🎰 Open Spin Wheel",
-                    "web_app": {"url": wheel_url},
-                }
-            ]
-        ]
-    }
-    send_message(chat_id, text, reply_markup=reply_markup)
+    wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=4_2_2"
+    txt = "🎰 សូមស្វាគមន៍មកកាន់កម្មវិធីកង់រង្វាន់!\nចុចប៊ូតុងខាងក្រោម ដើម្បី SPIN 🎯"
+    kb = {"inline_keyboard": [[{"text": "🎰 Open Spin Wheel", "web_app": {"url": wheel_url}}]]}
+    send_message(chat_id, txt, reply_markup=kb)
 
 
+# ---------- Limit System ----------
 def check_rate_limit(user_id: str):
-    """បងារ Claim ជាធម្មតា: limit seconds និង limit per day."""
-    now_ts = time.time()
+    now = time.time()
     today = date.today().isoformat()
-
     info = user_limits.get(user_id)
+
     if not info:
-        info = {"last_ts": 0.0, "day": today, "count": 0}
+        info = {"last": 0.0, "day": today, "count": 0}
         user_limits[user_id] = info
 
-    # reset count បើថ្ងៃថ្មី
+    # New day reset
     if info["day"] != today:
         info["day"] = today
         info["count"] = 0
 
-    # second-based limit
-    if now_ts - info["last_ts"] < MIN_SECONDS_BETWEEN_CLAIMS:
+    # Seconds limit
+    if now - info["last"] < MIN_SECONDS_BETWEEN_CLAIMS:
         return False, "⏳ សូមរង់ចាំបន្តិច មុនពេល SPIN ឡើងវិញ។"
 
-    # daily count limit
+    # Daily quota
     if info["count"] >= MAX_DAILY_CLAIMS:
-        return False, "🚫 អ្នកបានលេងពេញកូតាប្រចាំថ្ងៃរួចហើយ។ សូមមកលេងម្ដងទៀតថ្ងៃស្អែក។"
+        return False, "🚫 ពេញកូតាប្រចាំថ្ងៃ! សូមមកលេងម្ដងទៀតថ្ងៃស្អែក។"
 
-    # OK
-    info["last_ts"] = now_ts
+    info["last"] = now
     info["count"] += 1
     return True, None
 
-# ---------- Flask app ----------
+
+# ---------- Flask ----------
 app = Flask(__name__)
 
 
 @app.route("/")
 def index():
-    return "Spin Wheel Telegram Bot v4.2.1 PRO is running ✅"
+    return "Spin Wheel Bot v4.2.2 PRO Running ✅"
 
 
 @app.route("/wheel")
 def wheel_page():
-    # serve wheel.html ជា static file (ដាក់ឯកសារនេះនៅថតដូច main.py)
     return send_from_directory(".", "wheel.html")
 
 
 @app.route("/claim", methods=["POST"])
 def claim():
-    """
-    JSON ត្រូវមកពី wheel.html:
-    {
-      "user_id": 5529...,
-      "prize": "Lucky Spin x2",
-      "image": "data:image/png;base64,...."
-    }
-    """
     data = request.get_json(force=True, silent=True) or {}
     user_id = data.get("user_id")
     prize = data.get("prize")
-    image_data_url = data.get("image")
+    image_data = data.get("image")
 
     if not user_id:
-        log.error("/claim missing user_id: %s", data)
         return jsonify({"ok": False, "error": "missing user_id"}), 400
 
-    user_id_str = str(user_id)
-    log.info("Received claim from %s: %s", user_id_str, prize)
-
-    # Rate-limit & daily quota
-    ok, msg = check_rate_limit(user_id_str)
+    uid = str(user_id)
+    ok, msg = check_rate_limit(uid)
     if not ok:
-        # ផ្ញើសារ notify ទៅ user
         send_message(user_id, msg, parse_html=False)
         return jsonify({"ok": False, "error": "rate_limited"}), 429
 
     photo_id = None
-
-    # Decode & send screenshot (optional but recommended)
-    if image_data_url and image_data_url.startswith("data:image"):
+    if image_data and image_data.startswith("data:image"):
         try:
-            header, b64 = image_data_url.split(",", 1)
-            img_bytes = base64.b64decode(b64)
-            bio = BytesIO(img_bytes)
-            bio.name = "wheel.png"
-
-            # caption សាមញ្ញ គ្មាន HTML
-            cap = f"🎰 លទ្ធផលកង់រង្វាន់របស់អ្នក: {prize}"
-            resp = send_photo(user_id, bio, caption=cap)
+            _, b64 = image_data.split(",", 1)
+            img = BytesIO(base64.b64decode(b64))
+            img.name = "wheel.png"
+            resp = send_photo(user_id, img, caption=f"🎰 លទ្ធផលរង្វាន់: {prize}")
             if resp and resp.get("ok"):
                 ph = resp["result"]["photo"]
                 photo_id = ph[-1]["file_id"]
-        except Exception as e:
-            log.exception("Failed to decode/send screenshot: %s", e)
+        except:
+            pass
 
-    # Save state: បន្ទាប់សួរឈ្មោះ
-    user_states[user_id_str] = {
-        "step": "ask_name",
-        "prize": prize,
-        "photo_id": photo_id,
-        "created_at": time.time(),
-    }
+    user_states[uid] = {"step": "ask_name", "prize": prize, "photo_id": photo_id}
+    time.sleep(1)
 
-    # sleep តិចៗ ដើម្បី WebApp បិទសិន (ជួយឲ្យ message មិនបាត់)
-    time.sleep(1.0)
-
-    # Ask full name
-    text = (
-        f"🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់៖ <b>{prize}</b> 🎁\n\n"
-        "✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> របស់អ្នក។"
+    send_message(
+        user_id,
+        f"🎉 អបអរសាទរ! អ្នកបានទទួលរង្វាន់: <b>{prize}</b>\n\n✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b>។",
     )
-    send_message(user_id, text, parse_html=True)
-
     return jsonify({"ok": True})
 
 
-# ---------- Telegram long-poll ----------
+# ---------- Telegram Poll ----------
 def handle_update(update: dict):
     if "message" not in update:
         return
 
     msg = update["message"]
-    chat = msg.get("chat", {})
-    chat_id = chat.get("id")
+    chat_id = msg["chat"]["id"]
     text = msg.get("text", "")
-    from_user = msg.get("from", {})
-    user_id = from_user.get("id")
-    user_id_str = str(user_id)
+    user_id = msg.get("from", {}).get("id")
+    uid = str(user_id)
 
-    # Commands
+    # START
     if isinstance(text, str) and text.startswith("/start"):
         send_start_message(chat_id)
         return
 
-    # Only handle text for state machine
     if not isinstance(text, str):
         return
 
-    state = user_states.get(user_id_str)
-    if not state:
-        # no active claim for this user
+    st = user_states.get(uid)
+    if not st:
         return
 
-    step = state.get("step")
+    # STEP 1: NAME
+    if st["step"] == "ask_name":
+        full = text.strip()
+        if not full:
+            send_message(chat_id, "🙏 សូមវាយឈ្មោះម្តងទៀត។")
+            return
+        st["full_name"] = full
+        st["step"] = "ask_phone"
+        send_message(chat_id, f"👤 ឈ្មោះ៖ <b>{full}</b>\n\n📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទ។")
+        return
 
-    # ----- STEP 1: Ask name -----
-    if step == "ask_name":
-        full_name = text.strip()
-        if not full_name:
-            send_message(chat_id, "🙏 សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> ម្តងទៀត។")
+    # STEP 2: PHONE
+    if st["step"] == "ask_phone":
+        phone = text.strip()
+        if not phone:
+            send_message(chat_id, "📞 សូមវាយលេខទូរស័ព្ទម្តងទៀត។")
             return
 
-        state["full_name"] = full_name
-        state["step"] = "ask_phone"
+        st["phone"] = phone
+        st["step"] = "done"
 
-        send_message(
-            chat_id,
-            f"✅ បានឈ្មោះ៖ <b>{full_name}</b>\n\n"
-            "📞 សូមវាយបញ្ចូល <b>លេខទូរស័ព្ទ</b> របស់អ្នក។",
+        prize = st["prize"]
+        photo_id = st["photo_id"]
+        username = msg.get("from", {}).get("username")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Final message with contact buttons
+        final_txt = (
+            "🎉 <b>បញ្ជាក់ទទួលបានរង្វាន់ជោគជ័យ!</b>\n\n"
+            f"🎁 Prize: <b>{prize}</b>\n"
+            f"👤 Name: <b>{st['full_name']}</b>\n"
+            f"📞 Phone: <b>{phone}</b>\n\n"
+            "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ ❤️\n"
+            "បើចង់ទាក់ទងភ្នាក់ងារទាន់ចិត្ត៖"
         )
-        return
 
-    # ----- STEP 2: Ask phone -----
-if step == "ask_phone":
-    phone = text.strip()
-    if not phone:
-        send_message(chat_id, "📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទម្តងទៀត។")
-        return
-
-    state["phone"] = phone
-    state["step"] = "done"
-
-    prize = state.get("prize", "-")
-    photo_id = state.get("photo_id")
-    username = from_user.get("username")
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # ========== FINAL CONFIRM MESSAGE WITH CONTACT BUTTONS ==========
-    final_text = (
-        "🎉 <b>បញ្ជាក់ទទួលបានរង្វាន់ជោគជ័យ!</b>\n\n"
-        f"🎁 Prize: <b>{prize}</b>\n"
-        f"👤 Name: <b>{state['full_name']}</b>\n"
-        f"📞 Phone: <b>{phone}</b>\n\n"
-        "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ ❤️\n"
-        "បើចង់ទាក់ទងភ្នាក់ងារទាន់ចិត្ត៖"
-    )
-
-    contact_keyboard = {
-        "inline_keyboard": [
-            [
-                {"text": "💬 Telegram", "url": "https://t.me/chana_on"},
-                {"text": "📩 Messenger", "url": "https://m.me/your_page_here"},
+        kb = {
+            "inline_keyboard": [
+                [
+                    {"text": "💬 Telegram", "url": "https://t.me/chana_on"},
+                    {"text": "📩 Messenger", "url": "https://m.me/your_page_here"},
+                ]
             ]
-        ]
-    }
+        }
 
-    send_message(chat_id, final_text, reply_markup=contact_keyboard)
+        send_message(chat_id, final_txt, reply_markup=kb)
 
-    # Report message to group (plain text caption)
-    report_lines = [
-        "🎁 New Prize Claim",
-        "",
-        f"📅 Date/Time (Bangkok): {now_str}",
-        f"🆔 User ID: {user_id_str}",
-        f"👤 Full name: {state['full_name']}",
-        f"📞 Phone: {phone}",
-        f"🎯 Prize: {prize}",
-    ]
-    if username:
-        report_lines.append(f"📛 Username: @{username}")
-
-    report = "\n".join(report_lines)
-
-    if photo_id:
-        send_photo(TARGET_GROUP_ID, photo_id, caption=report)
-    else:
-        send_message(TARGET_GROUP_ID, report, parse_html=False)
-
-    # Clear state
-    user_states.pop(user_id_str, None)
-    return
-
-        # Report message to group (plain text caption)
-        report_lines = [
+        # Report to group
+        rep = [
             "🎁 New Prize Claim",
-            "",
-            f"📅 Date/Time (Bangkok): {now_str}",
-            f"🆔 User ID: {user_id_str}",
-            f"👤 Full name: {state['full_name']}",
+            f"📅 {now}",
+            f"🆔 User ID: {uid}",
+            f"👤 Full name: {st['full_name']}",
             f"📞 Phone: {phone}",
             f"🎯 Prize: {prize}",
         ]
         if username:
-            report_lines.append(f"📛 Username: @{username}")
+            rep.append(f"📛 Username: @{username}")
 
-        report = "\n".join(report_lines)
+        txt = "\n".join(rep)
 
         if photo_id:
-            send_photo(TARGET_GROUP_ID, photo_id, caption=report)
+            send_photo(TARGET_GROUP_ID, photo_id, caption=txt)
         else:
-            send_message(TARGET_GROUP_ID, report, parse_html=False)
+            send_message(TARGET_GROUP_ID, txt, parse_html=False)
 
-        # Clear state
-        user_states.pop(user_id_str, None)
+        user_states.pop(uid, None)
+        return
 
 
-def run_bot_loop():
-    log.info("🚀 Bot long-polling loop started")
+def run_bot():
+    log.info("🚀 Bot polling started")
     offset = None
     while True:
         try:
-            resp = requests.get(
-                f"{API_URL}/getUpdates",
-                params={"timeout": 50, "offset": offset},
-                timeout=60,
-            ).json()
-        except Exception as e:
-            log.exception("getUpdates failed: %s", e)
+            r = requests.get(f"{API_URL}/getUpdates", params={"timeout": 50, "offset": offset}, timeout=60).json()
+            if not r.get("ok"):
+                time.sleep(3)
+                continue
+            for upd in r.get("result", []):
+                offset = upd["update_id"] + 1
+                handle_update(upd)
+        except:
             time.sleep(3)
-            continue
-
-        if not resp.get("ok"):
-            log.error("getUpdates error: %s", resp)
-            time.sleep(3)
-            continue
-
-        for upd in resp.get("result", []):
-            offset = upd["update_id"] + 1
-            handle_update(upd)
 
 
+# ---------- START ----------
 if __name__ == "__main__":
-    # Run polling + Flask in single process
-    Thread(target=run_bot_loop, daemon=True).start()
-    log.info("🌐 Flask running on port 8080")
+    Thread(target=run_bot, daemon=True).start()
+    log.info("🌐 Flask running on 8080")
     app.run(host="0.0.0.0", port=8080)
