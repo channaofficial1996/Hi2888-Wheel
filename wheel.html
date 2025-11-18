@@ -190,6 +190,9 @@
 
   <div id="celebrate"></div>
 
+  <!-- html2canvas for screenshot -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
   <audio id="clapSound" preload="auto"></audio>
 
   <script>
@@ -255,7 +258,7 @@
 
     function playClap() {
       try {
-        // You can set src dynamically to some hosted clap sound
+        // Optionally set src to your clap sound URL
         // clapSound.src = "https://example.com/clap.mp3";
         clapSound.currentTime = 0;
         clapSound.play().catch(() => {});
@@ -300,14 +303,33 @@
     btnClaim.onclick = () => {
       if (!currentPrize) return;
 
-      if (tg && tg.sendData) {
-        const payload = {
-          action: "claim_prize",
-          prize: currentPrize,
-          ts: Date.now()
-        };
-        tg.sendData(JSON.stringify(payload));
-        tg.close();
+      if (tg && window.html2canvas) {
+        const user = tg.initDataUnsafe && tg.initDataUnsafe.user;
+
+        html2canvas(document.getElementById("wheel-wrapper")).then(canvas => {
+          const dataUrl = canvas.toDataURL("image/png");
+          return fetch("/claim", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({
+              image: dataUrl,
+              prize: currentPrize,
+              user_id: user ? user.id : null,
+              username: user ? user.username : null,
+              first_name: user ? user.first_name : null,
+              last_name: user ? user.last_name : null
+            })
+          });
+        }).then(r => r.json()).then(res => {
+          if (res.ok && tg) {
+            tg.close();
+          } else {
+            alert("Claim sent!");
+          }
+        }).catch(err => {
+          console.error(err);
+          alert("Error sending claim, please try again.");
+        });
       } else {
         alert("Claim sent: " + currentPrize);
       }
