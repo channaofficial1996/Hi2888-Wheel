@@ -1,23 +1,33 @@
-# main.py  — 2888 Wheel v4.2
+# main.py — 2888 Wheel v4.2.1 PRO
 # - Flask run on port 8080
 # - /wheel serve wheel.html
-# - /claim ពី WebApp -> bot DM (Name, Phone) -> report ទៅ group
+# - /claim ពី WebApp -> DM (Screenshot + Prize + Name + Phone) -> Report ទៅ Group
+#
+# ENV (Railway Variables):
+#   BOT_TOKEN         = "....."
+#   WEBAPP_URL        = "https://web-production-f91a3.up.railway.app"
+#   TARGET_GROUP_ID   = "-1003317283401"
+#   MAX_DAILY_CLAIMS  = "20"         (optional)
+#   MIN_SECONDS_BETWEEN_CLAIMS = "60" (optional)
 
 import os
 import time
 import base64
 import logging
-from datetime import datetime
+from datetime import datetime, date
 from io import BytesIO
 from threading import Thread
 
 import requests
 from flask import Flask, request, jsonify, send_from_directory
 
-# --------- ENV ---------
+# ---------- ENV ----------
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBAPP_URL = os.getenv("WEBAPP_URL", "").rstrip("/")
-TARGET_GROUP_ID = os.getenv("TARGET_GROUP_ID")  # keep as string
+WEBAPP_URL = (os.getenv("WEBAPP_URL") or "").rstrip("/")
+TARGET_GROUP_ID = os.getenv("TARGET_GROUP_ID")
+
+MAX_DAILY_CLAIMS = int(os.getenv("MAX_DAILY_CLAIMS", "20"))
+MIN_SECONDS_BETWEEN_CLAIMS = int(os.getenv("MIN_SECONDS_BETWEEN_CLAIMS", "60"))
 
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN not set")
@@ -29,12 +39,14 @@ if not TARGET_GROUP_ID:
 API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("wheelbot-v4-2")
+log = logging.getLogger("wheelbot-v4-2-1")
 
-# user_id (str) -> state data
-user_states = {}  # { user_id: {"step": "...", "prize": "...", "photo_id": "..."} }
+# user_id -> state
+user_states = {}      # វិនិយោគ state សម្រាប់ flow: name -> phone
+# user_id -> counters
+user_limits = {}      # {"last_ts": float, "day": "YYYY-MM-DD", "count": int}
 
-# --------- Telegram helpers ---------
+# ---------- Telegram helpers ----------
 def tg_request(method: str, params: dict = None, files: dict = None):
     url = f"{API_URL}/{method}"
     try:
@@ -50,43 +62,43 @@ def tg_request(method: str, params: dict = None, files: dict = None):
         return None
 
 
-def send_message(chat_id, text, reply_markup=None):
-    return tg_request(
-        "sendMessage",
-        {
-            "chat_id": chat_id,
-            "text": text,
-            "parse_mode": "HTML",
-            "reply_markup": reply_markup,
-        },
-    )
+def send_message(chat_id, text, reply_markup=None, parse_html: bool = True):
+    params = {
+        "chat_id": chat_id,
+        "text": text,
+    }
+    if parse_html:
+        params["parse_mode"] = "HTML"
+    if reply_markup:
+        params["reply_markup"] = reply_markup
+    return tg_request("sendMessage", params)
 
 
 def send_photo(chat_id, photo, caption=None):
     """
     photo អាចជា file_id (str) ឬ BytesIO.
-    នៅទីនេះយើងមិនប្រើ HTML tag ក្នុង caption ដូច្នេះ parse_mode មិនចាំបាច់។
+    Caption នៅទីនេះ យើងមិនប្រើ HTML tag ទេ -> សុទ្ធតែ text សាមញ្ញ។
     """
     if isinstance(photo, str) and not hasattr(photo, "read"):
-        return tg_request(
-            "sendPhoto",
-            {"chat_id": chat_id, "photo": photo, "caption": caption or ""},
-        )
+        params = {
+            "chat_id": chat_id,
+            "photo": photo,
+        }
+        if caption:
+            params["caption"] = caption
+        return tg_request("sendPhoto", params)
     else:
         files = {"photo": ("wheel.png", photo, "image/png")}
-        return tg_request(
-            "sendPhoto",
-            {"chat_id": chat_id, "caption": caption or ""},
-            files=files,
-        )
+        params = {"chat_id": chat_id}
+        if caption:
+            params["caption"] = caption
+        return tg_request("sendPhoto", params, files=files)
 
 
 def send_start_message(chat_id: int):
-    # បញ្ជូន chat_id (cid) ទៅក្នុង URL ដើម្បី WebApp ប្រើ
-    wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=42"
-
+    wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=4_2_1"
     text = (
-        "🎰 សូមស្វាគមន៍មកកាន់កង់រង្វាន់!\n"
+        "🎰 សូមស្វាគមន៍មកកាន់កម្មវិធីកង់រង្វាន់!\n"
         "ចុចប៊ូតុងខាងក្រោម ដើម្បីចាប់ផ្តើម SPIN Wheel 🎯"
     )
     reply_markup = {
@@ -102,26 +114,58 @@ def send_start_message(chat_id: int):
     send_message(chat_id, text, reply_markup=reply_markup)
 
 
-# --------- Flask app ---------
+def check_rate_limit(user_id: str):
+    """បងារ Claim ជាធម្មតា: limit seconds និង limit per day."""
+    now_ts = time.time()
+    today = date.today().isoformat()
+
+    info = user_limits.get(user_id)
+    if not info:
+        info = {"last_ts": 0.0, "day": today, "count": 0}
+        user_limits[user_id] = info
+
+    # reset count បើថ្ងៃថ្មី
+    if info["day"] != today:
+        info["day"] = today
+        info["count"] = 0
+
+    # second-based limit
+    if now_ts - info["last_ts"] < MIN_SECONDS_BETWEEN_CLAIMS:
+        return False, "⏳ សូមរង់ចាំបន្តិច មុនពេល SPIN ឡើងវិញ។"
+
+    # daily count limit
+    if info["count"] >= MAX_DAILY_CLAIMS:
+        return False, "🚫 អ្នកបានលេងពេញកូតាប្រចាំថ្ងៃរួចហើយ។ សូមមកលេងម្ដងទៀតថ្ងៃស្អែក។"
+
+    # OK
+    info["last_ts"] = now_ts
+    info["count"] += 1
+    return True, None
+
+# ---------- Flask app ----------
 app = Flask(__name__)
 
 
 @app.route("/")
 def index():
-    return "Spin Wheel Telegram Bot v4.2 is running ✅"
+    return "Spin Wheel Telegram Bot v4.2.1 PRO is running ✅"
 
 
-# serve wheel.html (ដាក់ wheel.html នៅថតដូច main.py)
 @app.route("/wheel")
 def wheel_page():
+    # serve wheel.html ជា static file (ដាក់ឯកសារនេះនៅថតដូច main.py)
     return send_from_directory(".", "wheel.html")
 
 
 @app.route("/claim", methods=["POST"])
 def claim():
     """
-    Called from wheel.html (WebApp) with JSON:
-    { "user_id": "...", "prize": "...", "image": "data:image/png;base64,..." }
+    JSON ត្រូវមកពី wheel.html:
+    {
+      "user_id": 5529...,
+      "prize": "Lucky Spin x2",
+      "image": "data:image/png;base64,...."
+    }
     """
     data = request.get_json(force=True, silent=True) or {}
     user_id = data.get("user_id")
@@ -129,34 +173,39 @@ def claim():
     image_data_url = data.get("image")
 
     if not user_id:
-        log.error("/claim without user_id: %s", data)
+        log.error("/claim missing user_id: %s", data)
         return jsonify({"ok": False, "error": "missing user_id"}), 400
 
     user_id_str = str(user_id)
     log.info("Received claim from %s: %s", user_id_str, prize)
 
+    # Rate-limit & daily quota
+    ok, msg = check_rate_limit(user_id_str)
+    if not ok:
+        # ផ្ញើសារ notify ទៅ user
+        send_message(user_id, msg, parse_html=False)
+        return jsonify({"ok": False, "error": "rate_limited"}), 429
+
     photo_id = None
 
-    # បើមាន screenshot -> ផ្ញើរូបទៅ user ហើយរក file_id
+    # Decode & send screenshot (optional but recommended)
     if image_data_url and image_data_url.startswith("data:image"):
         try:
             header, b64 = image_data_url.split(",", 1)
             img_bytes = base64.b64decode(b64)
             bio = BytesIO(img_bytes)
             bio.name = "wheel.png"
-            # caption សាមញ្ញ គ្មាន <b> tag
-            resp = send_photo(
-                user_id,
-                bio,
-                caption=f"🎰 លទ្ធផលកង់រង្វាន់របស់អ្នក:\n{prize}",
-            )
+
+            # caption សាមញ្ញ គ្មាន HTML
+            cap = f"🎰 លទ្ធផលកង់រង្វាន់របស់អ្នក: {prize}"
+            resp = send_photo(user_id, bio, caption=cap)
             if resp and resp.get("ok"):
-                photo_list = resp["result"]["photo"]
-                photo_id = photo_list[-1]["file_id"]
+                ph = resp["result"]["photo"]
+                photo_id = ph[-1]["file_id"]
         except Exception as e:
             log.exception("Failed to decode/send screenshot: %s", e)
 
-    # save state (ជំហាន ១: សួរ​ឈ្មោះ)
+    # Save state: បន្ទាប់សួរឈ្មោះ
     user_states[user_id_str] = {
         "step": "ask_name",
         "prize": prize,
@@ -164,25 +213,24 @@ def claim():
         "created_at": time.time(),
     }
 
- import time
+    # sleep តិចៗ ដើម្បី WebApp បិទសិន (ជួយឲ្យ message មិនបាត់)
+    time.sleep(1.0)
 
-# Ask name (delay fix)
-time.sleep(1.2)  # prevent lost message after WebApp close
-
-send_message(
-    user_id,
-    f"🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់៖ <b>{prize}</b> 🎁\n\n"
-    "✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> របស់អ្នក។"
-)
+    # Ask full name
+    text = (
+        f"🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់៖ <b>{prize}</b> 🎁\n\n"
+        "✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> របស់អ្នក។"
+    )
+    send_message(user_id, text, parse_html=True)
 
     return jsonify({"ok": True})
 
 
-# --------- Polling loop ---------
+# ---------- Telegram long-poll ----------
 def handle_update(update: dict):
-    """Handle one Telegram update (for long polling)."""
     if "message" not in update:
         return
+
     msg = update["message"]
     chat = msg.get("chat", {})
     chat_id = chat.get("id")
@@ -191,25 +239,27 @@ def handle_update(update: dict):
     user_id = from_user.get("id")
     user_id_str = str(user_id)
 
-    # commands
-    if text == "/start":
+    # Commands
+    if isinstance(text, str) and text.startswith("/start"):
         send_start_message(chat_id)
         return
 
+    # Only handle text for state machine
     if not isinstance(text, str):
         return
 
     state = user_states.get(user_id_str)
     if not state:
-        return  # no active claim
+        # no active claim for this user
+        return
 
     step = state.get("step")
 
-    # Step 1: ask_name
+    # ----- STEP 1: Ask name -----
     if step == "ask_name":
         full_name = text.strip()
         if not full_name:
-            send_message(chat_id, "សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> ម្ដងទៀត 🙏")
+            send_message(chat_id, "🙏 សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> ម្តងទៀត។")
             return
 
         state["full_name"] = full_name
@@ -217,14 +267,18 @@ def handle_update(update: dict):
 
         send_message(
             chat_id,
-            "✅ បានឈ្មោះ៖ <b>{}</b>\n\n"
-            "📞 សូមបញ្ចូល <b>លេខទូរស័ព្ទ</b> របស់អ្នក។".format(full_name),
+            f"✅ បានឈ្មោះ៖ <b>{full_name}</b>\n\n"
+            "📞 សូមវាយបញ្ចូល <b>លេខទូរស័ព្ទ</b> របស់អ្នក។",
         )
         return
 
-    # Step 2: ask_phone
+    # ----- STEP 2: Ask phone -----
     if step == "ask_phone":
         phone = text.strip()
+        if not phone:
+            send_message(chat_id, "📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទម្តងទៀត។")
+            return
+
         state["phone"] = phone
         state["step"] = "done"
 
@@ -233,37 +287,37 @@ def handle_update(update: dict):
         username = from_user.get("username")
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # confirm to user
+        # Confirm to user
         send_message(
             chat_id,
-            "🎉 <b>បញ្ជាក់ជោគជ័យ!</b>\n\n"
-            "🎁 Prize: <b>{}</b>\n"
-            "👤 Name: <b>{}</b>\n"
-            "📞 Phone: <b>{}</b>\n\n"
-            "សូមរង់ចាំភ្នាក់ងារ ទាក់ទងមកវិញ ❤".format(
-                prize, state["full_name"], phone
-            ),
+            "🎉 <b>បញ្ជាក់ទទួលបានរង្វាន់ជោគជ័យ!</b>\n\n"
+            f"🎁 Prize: <b>{prize}</b>\n"
+            f"👤 Name: <b>{state['full_name']}</b>\n"
+            f"📞 Phone: <b>{phone}</b>\n\n"
+            "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ ❤️",
         )
 
-        # report to group (គ្មាន HTML tag ដើម្បីប្រើបានទោះបីជា photo caption)
-        report = (
-            "🎁 New Prize Claim\n\n"
-            f"📅 Date/Time (Bangkok): {now_str}\n"
-            f"🆔 User ID: {user_id_str}\n"
-            f"👤 Full name: {state['full_name']}\n"
-            f"📞 Phone: {phone}\n"
-            f"🎯 Prize: {prize}\n"
-        )
+        # Report message to group (plain text caption)
+        report_lines = [
+            "🎁 New Prize Claim",
+            "",
+            f"📅 Date/Time (Bangkok): {now_str}",
+            f"🆔 User ID: {user_id_str}",
+            f"👤 Full name: {state['full_name']}",
+            f"📞 Phone: {phone}",
+            f"🎯 Prize: {prize}",
+        ]
         if username:
-            report += f"📛 Username: @{username}\n"
+            report_lines.append(f"📛 Username: @{username}")
 
-        # បើមាន screenshot -> ផ្ញើរូប + caption report, បើមិនមាន -> sendMessage
+        report = "\n".join(report_lines)
+
         if photo_id:
             send_photo(TARGET_GROUP_ID, photo_id, caption=report)
         else:
-            send_message(TARGET_GROUP_ID, report)
+            send_message(TARGET_GROUP_ID, report, parse_html=False)
 
-        # cleanup
+        # Clear state
         user_states.pop(user_id_str, None)
 
 
@@ -293,7 +347,7 @@ def run_bot_loop():
 
 
 if __name__ == "__main__":
-    # Railway: run Flask + polling in same process using threads
+    # Run polling + Flask in single process
     Thread(target=run_bot_loop, daemon=True).start()
     log.info("🌐 Flask running on port 8080")
     app.run(host="0.0.0.0", port=8080)
