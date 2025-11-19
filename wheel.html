@@ -22,7 +22,7 @@
     }
     #emoji { font-size: 26px; }
 
-    /* pointer ក្រហមនៅលើ ចង្អុលចុះក្រោម */
+    /* pointer at top, pointing down */
     #pointer {
       width: 0;
       height: 0;
@@ -158,14 +158,14 @@
 
   <p id="status"></p>
 
-  <!-- 🔊 Start spin sound (បងដាក់ spin.mp3 របស់ខ្លួននៅ path ខាងក្រោម) -->
+  <!-- 🔊 Spin start sound -->
   <audio id="spinSound">
-    <source src="/static/sounds/spin.mp3" type="audio/mpeg">
+    <source src="https://cdn.pixabay.com/download/audio/2022/03/15/audio_6c5b1d1f67.mp3" type="audio/mpeg">
   </audio>
 
-  <!-- 🔊 Jackpot / Win sound -->
+  <!-- 🔊 Jackpot sound -->
   <audio id="jackpotSound">
-    <source src="/static/sounds/jackpot.mp3" type="audio/mpeg">
+    <source src="https://cdn.pixabay.com/download/audio/2022/03/10/audio_1fe3c46b0a.mp3" type="audio/mpeg">
   </audio>
 
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -197,7 +197,7 @@
     let spinning = false;
     let currentPrize = null;
 
-    // ---------- Canvas wheel (Khmer text) ----------
+    // CANVAS
     const canvas = document.getElementById("wheelCanvas");
     const ctx = canvas.getContext("2d");
     const centerX = canvas.width / 2;
@@ -237,7 +237,7 @@
     }
     drawWheel();
 
-    // ---------- Telegram WebApp ----------
+    // Telegram WebApp
     const tg = window.Telegram && window.Telegram.WebApp
       ? window.Telegram.WebApp
       : null;
@@ -246,7 +246,7 @@
     const params = new URLSearchParams(window.location.search);
     const cidFromUrl = params.get("cid");
 
-    // ---------- LIMIT 1 SPIN / DAY / USER ----------
+    // LIMIT 1 SPIN / DAY / USER
     function getUserId() {
       const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
       return cidFromUrl || (webUser && webUser.id) || null;
@@ -274,7 +274,6 @@
         localStorage.setItem(key, today);
       } catch (e) {}
     }
-    // ------------------------------------------------
 
     function showCelebrate() {
       const celebrate = document.createElement("div");
@@ -296,6 +295,7 @@
     }
 
     spinBtn.onclick = () => {
+
       if (!canSpinToday()) {
         statusEl.textContent = "❌ អ្នកបាន SPIN រួចថ្ងៃនេះហើយ។ សូមរង់ចាំថ្ងៃបន្ទាប់!";
         return;
@@ -307,16 +307,13 @@
       statusEl.textContent = "";
       center.classList.remove("show");
 
-      // 🔊 Start spin sound
-      if (spinSoundEl) {
-        spinSoundEl.currentTime = 0;
-        spinSoundEl.play().catch(() => {});
-      }
+      // 🔊 Spin start sound
+      spinSoundEl.currentTime = 0;
+      spinSoundEl.play().catch(()=>{});
 
       const randIndex = Math.floor(Math.random() * prizes.length);
       const spins = 5;
 
-      // pointer នៅលើ (arrow ចង្អុលចុះ) → ប្រើ formula ចាស់
       const targetAngle =
         spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
 
@@ -333,12 +330,9 @@
         showCelebrate();
 
         // 🔊 Jackpot sound
-        if (jackpotSoundEl) {
-          jackpotSoundEl.currentTime = 0;
-          jackpotSoundEl.play().catch(() => {});
-        }
+        jackpotSoundEl.currentTime = 0;
+        jackpotSoundEl.play().catch(()=>{});
 
-        // mark spun today
         markSpunToday();
 
         statusEl.textContent = "Sending to bot...";
