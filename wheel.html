@@ -318,8 +318,9 @@
       const spins = 5;
 
       // pointer នៅខាងក្រោម
-      const targetAngle =
-        spins * 360 + (randIndex * anglePer + anglePer / 2);
+  const targetAngle =
+  spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
+
 
       currentRotation += targetAngle;
       wheel.style.transform = `rotate(${currentRotation}deg)`;
