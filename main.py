@@ -37,6 +37,17 @@ log = logging.getLogger("wheelbot-v4-2-2")
 user_states = {}      # user_id -> {step, prize, photo_id, full_name, phone}
 user_limits = {}      # user_id -> rate-limit info
 
+# ---------- Reply Keyboard (2 buttons) ----------
+MAIN_KEYBOARD = {
+    "keyboard": [
+        [
+            {"text": "🎰 Spin"},
+            {"text": "▶️ Start"},
+        ]
+    ],
+    "resize_keyboard": True,
+}
+
 
 # ---------- Telegram Helper ----------
 def tg_request(method: str, params: dict = None, files: dict = None):
@@ -91,7 +102,8 @@ def send_photo(chat_id, photo, caption=None, parse_html=True, reply_markup=None)
     return tg_request("sendPhoto", params, files=files)
 
 
-def send_start_message(chat_id: int):
+def send_spin_inline(chat_id: int):
+    """Send inline 'Open Spin Wheel' button (used by /start & 🎰 Spin)."""
     wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=4_2_2"
     txt = "🎰 សូមស្វាគមន៍មកកាន់កម្មវិធីកង់រង្វាន់!\nចុចប៊ូតុងខាងក្រោម ដើម្បី SPIN 🎯"
     kb = {
@@ -100,6 +112,16 @@ def send_start_message(chat_id: int):
         ]
     }
     send_message(chat_id, txt, reply_markup=kb)
+
+
+def send_start_message(chat_id: int):
+    """Show reply keyboard + inline spin button."""
+    # reply keyboard (2 buttons) – persistent under input bar
+    menu_txt = "ជ្រើសប៊ូតុងខាងក្រោម 👇"
+    send_message(chat_id, menu_txt, reply_markup=MAIN_KEYBOARD, parse_html=False)
+
+    # inline button for opening webapp
+    send_spin_inline(chat_id)
 
 
 # ---------- Limit System ----------
@@ -206,115 +228,134 @@ def handle_update(update: dict):
     user_id = msg.get("from", {}).get("id")
     uid = str(user_id)
 
-    # START
-    if isinstance(text, str) and text.startswith("/start"):
-        send_start_message(chat_id)
-        return
-
     if not isinstance(text, str):
         return
 
+    # /start command
+    if text.startswith("/start"):
+        send_start_message(chat_id)
+        return
+
+    # current state (name / phone)
     st = user_states.get(uid)
-    if not st:
-        return
 
-    # STEP 1: NAME
-    if st["step"] == "ask_name":
-        full = text.strip()
-        if not full:
-            send_message(chat_id, "🙏 សូមវាយឈ្មោះម្តងទៀត។")
-            return
-        st["full_name"] = full
-        st["step"] = "ask_phone"
-        send_message(
-            chat_id,
-            f"👤 ឈ្មោះ៖ <b>{full}</b>\n\n📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទ។",
-        )
-        return
-
-    # STEP 2: PHONE
-    if st["step"] == "ask_phone":
-        phone = text.strip()
-        if not phone:
-            send_message(chat_id, "📞 សូមវាយលេខទូរស័ព្ទម្តងទៀត។")
-            return
-
-        st["phone"] = phone
-        st["step"] = "done"
-
-        prize = st["prize"]
-        photo_id = st["photo_id"]
-        username = msg.get("from", {}).get("username")
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # Final message with contact buttons (to user)
-        final_txt = (
-            "🎉 <b>បញ្ជាក់ទទួលបានរង្វាន់ជោគជ័យ!</b>\n\n"
-            f"🎁 Prize: <b>{prize}</b>\n"
-            f"👤 Name: <b>{st['full_name']}</b>\n"
-            f"📞 Phone: <b>{phone}</b>\n\n"
-            "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ ❤️\n"
-            "បើចង់ទាក់ទងភ្នាក់ងារទាន់ចិត្ត៖"
-        )
-
-        kb_user = {
-            "inline_keyboard": [
-                [
-                    {"text": "💬 Telegram", "url": "https://t.me/Hi2888CS1"},
-                    {"text": "📩 Messenger", "url": "m.me/920030077853046"},
-                ]
-            ]
-        }
-
-        send_message(chat_id, final_txt, reply_markup=kb_user)
-
-        # -------- Report to group (with Contact User button) --------
-        rep = [
-            "🎁 New Prize Claim",
-            f"📅 {now}",
-            f"🆔 User ID: {uid}",
-            f"👤 Full name: <b>{st['full_name']}</b>",
-            f"📞 Phone: <b>{phone}</b>",
-            f"🎯 Prize: <b>{prize}</b>",
-        ]
-        if username:
-            rep.append(f"📛 Username: @{username}")
-
-        txt = "\n".join(rep)
-
-        # Inline button → open chat with user
-        kb_group = {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "🔗 Message User",
-                        "url": f"tg://user?id={uid}",
-                    }
-                ]
-            ]
-        }
-
-        if photo_id:
-            # photo + caption + button in ONE message
-            send_photo(
-                TARGET_GROUP_ID,
-                photo_id,
-                caption=txt,
-                parse_html=True,
-                reply_markup=kb_group,
-            )
-        else:
-            # text + button in ONE message
+    # --- STATE FLOW HAS PRIORITY (do not break old functions) ---
+    if st:
+        # STEP 1: NAME
+        if st["step"] == "ask_name":
+            full = text.strip()
+            if not full:
+                send_message(chat_id, "🙏 សូមវាយឈ្មោះម្តងទៀត។")
+                return
+            st["full_name"] = full
+            st["step"] = "ask_phone"
             send_message(
-                TARGET_GROUP_ID,
-                txt,
-                parse_html=True,
-                reply_markup=kb_group,
+                chat_id,
+                f"👤 ឈ្មោះ៖ <b>{full}</b>\n\n📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទ។",
+            )
+            return
+
+        # STEP 2: PHONE
+        if st["step"] == "ask_phone":
+            phone = text.strip()
+            if not phone:
+                send_message(chat_id, "📞 សូមវាយលេខទូរស័ព្ទម្តងទៀត។")
+                return
+
+            st["phone"] = phone
+            st["step"] = "done"
+
+            prize = st["prize"]
+            photo_id = st["photo_id"]
+            username = msg.get("from", {}).get("username")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Final message with contact buttons (to user)
+            final_txt = (
+                "🎉 <b>បញ្ជាក់ទទួលបានរង្វាន់ជោគជ័យ!</b>\n\n"
+                f"🎁 Prize: <b>{prize}</b>\n"
+                f"👤 Name: <b>{st['full_name']}</b>\n"
+                f"📞 Phone: <b>{phone}</b>\n\n"
+                "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ ❤️\n"
+                "បើចង់ទាក់ទងភ្នាក់ងារទាន់ចិត្ត៖"
             )
 
-        # clear state
-        user_states.pop(uid, None)
+            kb_user = {
+                "inline_keyboard": [
+                    [
+                        {"text": "💬 Telegram", "url": "https://t.me/Hi2888CS1"},
+                        {"text": "📩 Messenger", "url": "m.me/920030077853046"},
+                    ]
+                ]
+            }
+
+            send_message(chat_id, final_txt, reply_markup=kb_user)
+
+            # -------- Report to group (with Contact User button) --------
+            rep = [
+                "🎁 New Prize Claim",
+                f"📅 {now}",
+                f"🆔 User ID: {uid}",
+                f"👤 Full name: <b>{st['full_name']}</b>",
+                f"📞 Phone: <b>{phone}</b>",
+                f"🎯 Prize: <b>{prize}</b>",
+            ]
+            if username:
+                rep.append(f"📛 Username: @{username}")
+
+            txt = "\n".join(rep)
+
+            # Inline button → open chat with user
+            kb_group = {
+                "inline_keyboard": [
+                    [
+                        {
+                            "text": "🔗 Message User",
+                            "url": f"tg://user?id={uid}",
+                        }
+                    ]
+                ]
+            }
+
+            if photo_id:
+                # photo + caption + button in ONE message
+                send_photo(
+                    TARGET_GROUP_ID,
+                    photo_id,
+                    caption=txt,
+                    parse_html=True,
+                    reply_markup=kb_group,
+                )
+            else:
+                # text + button in ONE message
+                send_message(
+                    TARGET_GROUP_ID,
+                    txt,
+                    parse_html=True,
+                    reply_markup=kb_group,
+                )
+
+            # clear state
+            user_states.pop(uid, None)
+            return
+
+        # if step is "done" or unknown → ignore
         return
+
+    # --- NO STATE: handle new buttons ---
+
+    # Reply keyboard button: 🎰 Spin
+    if text == "🎰 Spin":
+        send_spin_inline(chat_id)
+        return
+
+    # Reply keyboard button: ▶️ Start
+    if text == "▶️ Start":
+        send_start_message(chat_id)
+        return
+
+    # other random text when no state → ignore
+    return
 
 
 def run_bot():
