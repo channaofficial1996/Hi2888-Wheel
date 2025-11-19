@@ -153,7 +153,7 @@
   <button id="spinBtn">SPIN</button>
 
   <div class="bottom-row">
-    <button id="agentBtn" class="btn">💬 Contact Agent</button>
+    <button id="agentBtn" class="btn">💬 ភ្នាក់ងារបម្រើអតិថិជនt</button>
   </div>
 
   <p id="status"></p>
@@ -180,6 +180,9 @@
       "ប្រាក់បន្ថែម 10$",
       "ប្រាក់បន្ថែម 5$",
       "Try Again",
+      "ប្រាក់បន្ថែម 100%",
+      "ប្រាក់បន្ថែម 10$",
+      "ប្រាក់បន្ថែម 5$",
     ];
 
     const wheel = document.getElementById("wheel");
@@ -247,7 +250,7 @@
     const cidFromUrl = params.get("cid");
 
     // ⭐⭐⭐ LIMIT SPIN / DAY (កំណត់នៅទីនេះ)
-    const SPINS_PER_DAY = 5; // ⬅⬅⬅ កែលេខនេះដើម្បីកំណត់ចំនួន spin / 1ថ្ងៃ / 1 user
+    const SPINS_PER_DAY = 1; // ⬅⬅⬅ កែលេខនេះដើម្បីកំណត់ចំនួន spin / 1ថ្ងៃ / 1 user
 
     function getUserId() {
       const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
@@ -323,7 +326,7 @@
     spinBtn.onclick = () => {
 
       if (!canSpinToday()) {
-        statusEl.textContent = "❌ អ្នកបាន SPIN អស់កូត quota ថ្ងៃនេះហើយ!";
+        statusEl.textContent = "❌ ថ្ងៃនេះអ្នកបានបង្វិលរួចហើយ សូមព្យាយាមម្តងទៀតនៅថ្ងៃស្អែក!";
         return;
       }
 
@@ -352,7 +355,7 @@
 
         centerPrize.textContent = prize;
         center.classList.add("show");
-        statusEl.textContent = "You won: " + prize + " 🎉";
+        statusEl.textContent = "🎊អ្នកទទួលបាន🎊: " + prize + " 🎉";
         showCelebrate();
 
         // 🔊 Jackpot sound
@@ -362,11 +365,11 @@
         // increase count today
         markSpunToday();
 
-        statusEl.textContent = "Sending to bot...";
+        statusEl.textContent = "📨កំពុងផ្ញើទៅ bot...";
         autoClaim()
           .then((ok) => {
             if (ok) {
-              statusEl.textContent = "✅ Sent! Please check the chat.";
+              statusEl.textContent = "✅ការផ្ញើបានជោគជ័យ សូមត្រឡប់ទៅ Bot ដើម្បីបំពេញឈ្មោះ.";
             } else {
               statusEl.textContent = "❌ Failed to send, please try again.";
             }
