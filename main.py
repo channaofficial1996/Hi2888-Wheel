@@ -245,28 +245,27 @@ def handle_update(update: dict):
         }
 
         send_message(chat_id, final_txt, reply_markup=kb)
+        
+# Report to group (with clickable user id link)
+rep = [
+    "🎁 New Prize Claim",
+    f"📅 {now}",
+    f'🆔 User: <a href="tg://user?id={uid}">{uid}</a>',
+    f"👤 Full name: <b>{st['full_name']}</b>",
+    f"📞 Phone: <b>{phone}</b>",
+    f"🎯 Prize: <b>{prize}</b>",
+]
 
-        # Report to group
-        rep = [
-            "🎁 New Prize Claim",
-            f"📅 {now}",
-            f"🆔 User ID: {uid}",
-            f"👤 Full name: {st['full_name']}",
-            f"📞 Phone: {phone}",
-            f"🎯 Prize: {prize}",
-        ]
-        if username:
-            rep.append(f"📛 Username: @{username}")
+if username:
+    rep.append(f"📛 Username: @{username}")
 
-        txt = "\n".join(rep)
+txt = "\n".join(rep)
 
-        if photo_id:
-            send_photo(TARGET_GROUP_ID, photo_id, caption=txt)
-        else:
-            send_message(TARGET_GROUP_ID, txt, parse_html=False)
-
-        user_states.pop(uid, None)
-        return
+# Send with image if available
+if photo_id:
+    send_photo(TARGET_GROUP_ID, photo_id, caption=txt, parse_html=True)
+else:
+    send_message(TARGET_GROUP_ID, txt, parse_html=True)
 
 
 def run_bot():
