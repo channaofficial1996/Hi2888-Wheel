@@ -249,7 +249,7 @@ def handle_update(update: dict):
             "បើចង់ទាក់ទងភ្នាក់ងារទាន់ចិត្ត៖"
         )
 
-        kb = {
+        kb_user = {
             "inline_keyboard": [
                 [
                     {"text": "💬 Telegram", "url": "https://t.me/Hi2888CS1"},
@@ -258,40 +258,47 @@ def handle_update(update: dict):
             ]
         }
 
-        send_message(chat_id, final_txt, reply_markup=kb)
+        send_message(chat_id, final_txt, reply_markup=kb_user)
 
-      # -------- Report to group (with Contact User button) --------
-rep = [
-    "🎁 New Prize Claim",
-    f"📅 {now}",
-    f"🆔 User ID: {uid}",
-    f"👤 Full name: <b>{st['full_name']}</b>",
-    f"📞 Phone: <b>{phone}</b>",
-    f"🎯 Prize: <b>{prize}</b>",
-]
-
-if username:
-    rep.append(f"📛 Username: @{username}")
-
-txt = "\n".join(rep)
-
-# Inline button → open chat with user
-kb = {
-    "inline_keyboard": [
-        [
-            {
-                "text": "🔗 Message User",
-                "url": f"tg://user?id={uid}"
-            }
+        # -------- Report to group (with Contact User button) --------
+        rep = [
+            "🎁 New Prize Claim",
+            f"📅 {now}",
+            f"🆔 User ID: {uid}",
+            f"👤 Full name: <b>{st['full_name']}</b>",
+            f"📞 Phone: <b>{phone}</b>",
+            f"🎯 Prize: <b>{prize}</b>",
         ]
-    ]
-}
+        if username:
+            rep.append(f"📛 Username: @{username}")
 
-if photo_id:
-    send_photo(TARGET_GROUP_ID, photo_id, caption=txt, parse_html=True)
-    send_message(TARGET_GROUP_ID, "👇 Contact User", reply_markup=kb)
-else:
-    send_message(TARGET_GROUP_ID, txt, parse_html=True, reply_markup=kb)
+        txt = "\n".join(rep)
+
+        # Inline button → open chat with user
+        kb_group = {
+            "inline_keyboard": [
+                [
+                    {
+                        "text": "🔗 Message User",
+                        "url": f"tg://user?id={uid}",
+                    }
+                ]
+            ]
+        }
+
+        if photo_id:
+            # caption on photo
+            send_photo(TARGET_GROUP_ID, photo_id, caption=txt, parse_html=True)
+            # separate message only for button label
+            send_message(TARGET_GROUP_ID, "👇 Contact User", reply_markup=kb_group)
+        else:
+            # text message + button
+            send_message(TARGET_GROUP_ID, txt, parse_html=True, reply_markup=kb_group)
+
+        # clear state
+        user_states.pop(uid, None)
+        return
+
 
 def run_bot():
     log.info("🚀 Bot polling started")
