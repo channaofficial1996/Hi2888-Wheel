@@ -82,10 +82,15 @@ def send_photo(chat_id, photo, caption=None, parse_html=True):
             params["parse_mode"] = "HTML"
     return tg_request("sendPhoto", params, files=files)
 
+
 def send_start_message(chat_id: int):
     wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=4_2_2"
     txt = "🎰 សូមស្វាគមន៍មកកាន់កម្មវិធីកង់រង្វាន់!\nចុចប៊ូតុងខាងក្រោម ដើម្បី SPIN 🎯"
-    kb = {"inline_keyboard": [[{"text": "🎰 Open Spin Wheel", "web_app": {"url": wheel_url}}]]}
+    kb = {
+        "inline_keyboard": [
+            [{"text": "🎰 Open Spin Wheel", "web_app": {"url": wheel_url}}]
+        ]
+    }
     send_message(chat_id, txt, reply_markup=kb)
 
 
@@ -168,7 +173,7 @@ def claim():
             if resp and resp.get("ok"):
                 ph = resp["result"]["photo"]
                 photo_id = ph[-1]["file_id"]
-        except:
+        except Exception:
             pass
 
     user_states[uid] = {"step": "ask_name", "prize": prize, "photo_id": photo_id}
@@ -180,6 +185,7 @@ def claim():
         "✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b>។",
     )
     return jsonify({"ok": True})
+
 
 # ---------- Telegram Poll ----------
 def handle_update(update: dict):
@@ -212,7 +218,10 @@ def handle_update(update: dict):
             return
         st["full_name"] = full
         st["step"] = "ask_phone"
-        send_message(chat_id, f"👤 ឈ្មោះ៖ <b>{full}</b>\n\n📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទ។")
+        send_message(
+            chat_id,
+            f"👤 ឈ្មោះ៖ <b>{full}</b>\n\n📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទ។",
+        )
         return
 
     # STEP 2: PHONE
@@ -230,7 +239,7 @@ def handle_update(update: dict):
         username = msg.get("from", {}).get("username")
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        # Final message with contact buttons
+        # Final message with contact buttons (to user)
         final_txt = (
             "🎉 <b>បញ្ជាក់ទទួលបានរង្វាន់ជោគជ័យ!</b>\n\n"
             f"🎁 Prize: <b>{prize}</b>\n"
@@ -250,27 +259,29 @@ def handle_update(update: dict):
         }
 
         send_message(chat_id, final_txt, reply_markup=kb)
-        
-# Report to group (with clickable user id link)
-rep = [
-    "🎁 New Prize Claim",
-    f"📅 {now}",
-    f'🆔 User: <a href="tg://user?id={uid}">{uid}</a>',
-    f"👤 Full name: <b>{st['full_name']}</b>",
-    f"📞 Phone: <b>{phone}</b>",
-    f"🎯 Prize: <b>{prize}</b>",
-]
 
-if username:
-    rep.append(f"📛 Username: @{username}")
+        # -------- Report to group (with clickable user id link) --------
+        rep = [
+            "🎁 New Prize Claim",
+            f"📅 {now}",
+            f'🆔 User: <a href="tg://user?id={uid}">{uid}</a>',
+            f"👤 Full name: <b>{st['full_name']}</b>",
+            f"📞 Phone: <b>{phone}</b>",
+            f"🎯 Prize: <b>{prize}</b>",
+        ]
+        if username:
+            rep.append(f"📛 Username: @{username}")
 
-txt = "\n".join(rep)
+        txt = "\n".join(rep)
 
-# Send with image if available
-if photo_id:
-    send_photo(TARGET_GROUP_ID, photo_id, caption=txt, parse_html=True)
-else:
-    send_message(TARGET_GROUP_ID, txt, parse_html=True)
+        if photo_id:
+            send_photo(TARGET_GROUP_ID, photo_id, caption=txt, parse_html=True)
+        else:
+            send_message(TARGET_GROUP_ID, txt, parse_html=True)
+
+        # clear state
+        user_states.pop(uid, None)
+        return
 
 
 def run_bot():
@@ -278,14 +289,18 @@ def run_bot():
     offset = None
     while True:
         try:
-            r = requests.get(f"{API_URL}/getUpdates", params={"timeout": 50, "offset": offset}, timeout=60).json()
+            r = requests.get(
+                f"{API_URL}/getUpdates",
+                params={"timeout": 50, "offset": offset},
+                timeout=60,
+            ).json()
             if not r.get("ok"):
                 time.sleep(3)
                 continue
             for upd in r.get("result", []):
                 offset = upd["update_id"] + 1
                 handle_update(upd)
-        except:
+        except Exception:
             time.sleep(3)
 
 
