@@ -159,16 +159,16 @@
   <p id="status"></p>
 
   <!-- 🔊 Spin start sound -->
-<audio id="spinSound">
-  <source src="/mnt/data/mixkit-bike-wheel-spinning-1613.wav" type="audio/wav">
-</audio>
+  <audio id="spinSound">
+    <source src="/mnt/data/mixkit-bike-wheel-spinning-1613.wav" type="audio/wav">
+  </audio>
 
-<!-- 🔊 Jackpot sound -->
-<audio id="jackpotSound">
-  <source src="/mnt/data/mixkit-cheering-crowd-loud-whistle-610.wav" type="audio/wav">
-</audio>
+  <!-- 🔊 Jackpot sound -->
+  <audio id="jackpotSound">
+    <source src="/mnt/data/mixkit-cheering-crowd-loud-whistle-610.wav" type="audio/wav">
+  </audio>
 
-<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
   <script>
     const prizes = [
@@ -246,20 +246,35 @@
     const params = new URLSearchParams(window.location.search);
     const cidFromUrl = params.get("cid");
 
-    // LIMIT 1 SPIN / DAY / USER
+    // ⭐⭐⭐ LIMIT SPIN / DAY (កំណត់នៅទីនេះ)
+    const SPINS_PER_DAY = 3; // ⬅⬅⬅ កែលេខនេះដើម្បីកំណត់ចំនួន spin / 1ថ្ងៃ / 1 user
+
     function getUserId() {
       const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
       return cidFromUrl || (webUser && webUser.id) || null;
     }
 
+    // N ដងក្នុង 1ថ្ងៃ
     function canSpinToday() {
       try {
         const uid = getUserId();
         if (!uid) return true;
-        const key = "wheel_spin_" + uid;
+
+        const countKey = "wheel_spin_count_" + uid;
+        const dateKey  = "wheel_spin_date_" + uid;
+
         const today = new Date().toISOString().slice(0, 10);
-        const last = localStorage.getItem(key);
-        return last !== today;
+        const lastDate = localStorage.getItem(dateKey);
+        let count = Number(localStorage.getItem(countKey) || 0);
+
+        // ថ្ងៃថ្មី → reset count
+        if (lastDate !== today) {
+          localStorage.setItem(dateKey, today);
+          localStorage.setItem(countKey, "0");
+          return true;
+        }
+
+        return count < SPINS_PER_DAY;
       } catch (e) {
         return true;
       }
@@ -269,9 +284,20 @@
       try {
         const uid = getUserId();
         if (!uid) return;
-        const key = "wheel_spin_" + uid;
+
+        const countKey = "wheel_spin_count_" + uid;
+        const dateKey  = "wheel_spin_date_" + uid;
+
         const today = new Date().toISOString().slice(0, 10);
-        localStorage.setItem(key, today);
+        const lastDate = localStorage.getItem(dateKey);
+
+        if (lastDate !== today) {
+          localStorage.setItem(dateKey, today);
+          localStorage.setItem(countKey, "1");
+        } else {
+          let count = Number(localStorage.getItem(countKey) || 0);
+          localStorage.setItem(countKey, String(count + 1));
+        }
       } catch (e) {}
     }
 
@@ -297,7 +323,7 @@
     spinBtn.onclick = () => {
 
       if (!canSpinToday()) {
-        statusEl.textContent = "❌ អ្នកបាន SPIN រួចថ្ងៃនេះហើយ។ សូមរង់ចាំថ្ងៃបន្ទាប់!";
+        statusEl.textContent = "❌ អ្នកបាន SPIN អស់កូត quota ថ្ងៃនេះហើយ!";
         return;
       }
 
@@ -333,6 +359,7 @@
         jackpotSoundEl.currentTime = 0;
         jackpotSoundEl.play().catch(()=>{});
 
+        // increase count today
         markSpunToday();
 
         statusEl.textContent = "Sending to bot...";
