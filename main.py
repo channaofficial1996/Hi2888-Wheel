@@ -260,7 +260,7 @@ def handle_update(update: dict):
 
         send_message(chat_id, final_txt, reply_markup=kb_user)
 
-        # -------- Report to group (with Contact User button) --------
+                # -------- Report to group (with Contact User button) --------
         rep = [
             "🎁 New Prize Claim",
             f"📅 {now}",
@@ -287,18 +287,26 @@ def handle_update(update: dict):
         }
 
         if photo_id:
-            # caption on photo
-            send_photo(TARGET_GROUP_ID, photo_id, caption=txt, parse_html=True)
-            # separate message only for button label
-            send_message(TARGET_GROUP_ID, "👇 Contact User", reply_markup=kb_group)
+            # រូប + caption + ប៊ូតុង ក្នុងសារ​តែមួយ
+            send_photo(
+                TARGET_GROUP_ID,
+                photo_id,
+                caption=txt,
+                parse_html=True,
+                reply_markup=kb_group,
+            )
         else:
-            # text message + button
-            send_message(TARGET_GROUP_ID, txt, parse_html=True, reply_markup=kb_group)
+            # Text + ប៊ូតុង ក្នុងសារ​តែមួយ
+            send_message(
+                TARGET_GROUP_ID,
+                txt,
+                parse_html=True,
+                reply_markup=kb_group,
+            )
 
         # clear state
         user_states.pop(uid, None)
         return
-
 
 def run_bot():
     log.info("🚀 Bot polling started")
