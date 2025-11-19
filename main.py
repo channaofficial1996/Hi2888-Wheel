@@ -63,14 +63,20 @@ def send_message(chat_id, text, reply_markup=None, parse_html=True):
     return tg_request("sendMessage", params)
 
 
-def send_photo(chat_id, photo, caption=None, parse_html=True):
+def send_photo(chat_id, photo, caption=None, parse_html=True, reply_markup=None):
+    """
+    Send photo either by file_id (string) or BytesIO.
+    Supports HTML caption + inline keyboard.
+    """
     # case 1: file_id string
     if isinstance(photo, str) and not hasattr(photo, "read"):
         params = {"chat_id": chat_id, "photo": photo}
         if caption:
             params["caption"] = caption
-            if parse_html:
-                params["parse_mode"] = "HTML"
+        if parse_html:
+            params["parse_mode"] = "HTML"
+        if reply_markup:
+            params["reply_markup"] = reply_markup
         return tg_request("sendPhoto", params)
 
     # case 2: BytesIO image
@@ -78,8 +84,10 @@ def send_photo(chat_id, photo, caption=None, parse_html=True):
     params = {"chat_id": chat_id}
     if caption:
         params["caption"] = caption
-        if parse_html:
-            params["parse_mode"] = "HTML"
+    if parse_html:
+        params["parse_mode"] = "HTML"
+    if reply_markup:
+        params["reply_markup"] = reply_markup
     return tg_request("sendPhoto", params, files=files)
 
 
@@ -260,7 +268,7 @@ def handle_update(update: dict):
 
         send_message(chat_id, final_txt, reply_markup=kb_user)
 
-                # -------- Report to group (with Contact User button) --------
+        # -------- Report to group (with Contact User button) --------
         rep = [
             "🎁 New Prize Claim",
             f"📅 {now}",
@@ -287,7 +295,7 @@ def handle_update(update: dict):
         }
 
         if photo_id:
-            # រូប + caption + ប៊ូតុង ក្នុងសារ​តែមួយ
+            # photo + caption + button in ONE message
             send_photo(
                 TARGET_GROUP_ID,
                 photo_id,
@@ -296,7 +304,7 @@ def handle_update(update: dict):
                 reply_markup=kb_group,
             )
         else:
-            # Text + ប៊ូតុង ក្នុងសារ​តែមួយ
+            # text + button in ONE message
             send_message(
                 TARGET_GROUP_ID,
                 txt,
@@ -307,6 +315,7 @@ def handle_update(update: dict):
         # clear state
         user_states.pop(uid, None)
         return
+
 
 def run_bot():
     log.info("🚀 Bot polling started")
