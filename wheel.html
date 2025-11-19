@@ -1,330 +1,186 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="kh">
 <head>
   <meta charset="UTF-8" />
   <title>Spin Wheel</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
   <style>
     body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-family: "Khmer OS Battambang", "Hanuman", system-ui, sans-serif;
       text-align: center;
-      margin: 0;
-      padding: 20px;
       background: #f5f5f5;
+      padding: 20px;
     }
+
     h2 {
-      margin-top: 10px;
+      font-size: 24px;
+      margin-bottom: 8px;
       display: flex;
-      align-items: center;
       justify-content: center;
+      align-items: center;
       gap: 8px;
     }
-    #emoji { font-size: 26px; }
 
     #pointer {
       width: 0;
       height: 0;
       border-left: 18px solid transparent;
       border-right: 18px solid transparent;
-      border-bottom: 30px solid #e53935;
+      border-bottom: 35px solid #e53935;
       margin: 10px auto;
     }
 
-    #wheel-wrapper {
-      position: relative;
-      width: 280px;
-      height: 280px;
-      margin: 10px auto 12px;
-    }
-    #wheel {
-      width: 100%;
-      height: 100%;
+    #wheelCanvas {
+      width: 300px;
+      height: 300px;
       border-radius: 50%;
       border: 6px solid #333;
-      position: relative;
-      overflow: hidden;
-      background: #ffffff;
-      transition: transform 4s cubic-bezier(.17,.67,.32,1.34);
     }
-    .segment {
-      position: absolute;
-      width: 50%;
-      height: 50%;
-      top: 50%;
-      left: 50%;
-      transform-origin: 0% 0%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      text-align: center;
-      color: #fff;
-      padding: 4px;
-      box-sizing: border-box;
-    }
-    .segment:nth-child(odd)  { background:#42a5f5; }
-    .segment:nth-child(even) { background:#66bb6a; }
-
-    #center-result {
-      position: absolute;
-      inset: 25%;
-      border-radius: 50%;
-      background: rgba(0,0,0,0.65);
-      color: #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-direction: column;
-      padding: 10px;
-      box-sizing: border-box;
-      opacity: 0;
-      transform: scale(0.5);
-      pointer-events: none;
-      transition: all 0.35s ease-out;
-    }
-    #center-result.show {
-      opacity: 1;
-      transform: scale(1);
-      pointer-events: auto;
-    }
-    #center-result .label { font-size: 12px; opacity: 0.8; margin-bottom: 4px; }
-    #center-result .prize-text { font-size: 18px; font-weight: 700; text-align: center; }
 
     #spinBtn {
-      padding: 12px 30px;
-      font-size: 16px;
-      border-radius: 999px;
-      border: none;
+      margin-top: 12px;
       background: #ff9800;
       color: #fff;
+      border: none;
+      padding: 14px 28px;
+      font-size: 18px;
+      border-radius: 999px;
       cursor: pointer;
-      min-width: 140px;
     }
-    #spinBtn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-    .bottom-row {
-      display: flex;
-      gap: 8px;
-      justify-content: center;
-      margin-top: 12px;
+    #spinBtn:disabled {
+      opacity: 0.6;
     }
-    .btn {
-      padding: 10px 16px;
+
+    #agentBtn {
+      margin-top: 12px;
+      background: #1976d2;
+      color: #fff;
+      padding: 10px 18px;
       border-radius: 999px;
       border: none;
-      font-size: 14px;
-      cursor: pointer;
-      min-width: 140px;
-      color: #fff;
-    }
-    #agentBtn { background:#1976d2; }
-
-    #status {
-      margin-top: 10px;
-      font-size: 14px;
-      font-weight: 500;
+      font-size: 15px;
     }
 
-    #celebrate {
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      overflow: hidden;
-      z-index: 50;
-      font-size: 24px;
-      display: none;
-    }
-    .confetti {
-      position: absolute;
-      animation: fall 1.5s linear forwards;
-    }
-    @keyframes fall {
-      from { transform: translateY(-40px) rotate(0deg); opacity: 1; }
-      to   { transform: translateY(120vh) rotate(360deg); opacity: 0; }
+    #resultText {
+      margin-top: 12px;
+      font-size: 18px;
+      font-weight: bold;
     }
   </style>
 </head>
+
 <body>
-  <h2><span id="emoji">🎰</span><span>Spin & Win</span></h2>
+
+  <h2>🎰 Spin & Win</h2>
   <div id="pointer"></div>
 
-  <div id="wheel-wrapper">
-    <div id="wheel"></div>
-    <div id="center-result">
-      <div class="label">You won</div>
-      <div class="prize-text" id="centerPrize">-</div>
-    </div>
-  </div>
+  <canvas id="wheelCanvas" width="500" height="500"></canvas>
 
   <button id="spinBtn">SPIN</button>
+  <br>
+  <button id="agentBtn">💬 Contact Agent</button>
 
-  <div class="bottom-row">
-    <button id="agentBtn" class="btn">💬 Contact Agent</button>
-  </div>
+  <p id="resultText"></p>
 
-  <p id="status"></p>
+<script>
+  const prizes = [
+      "ប្រាក់បន្ថែម 100%",
+      "ប្រាក់បន្ថែម 10$",
+      "ប្រាក់បន្ថែម 5$",
+      "លេងម្ដងទៀត",
+      "ប្រាក់បន្ថែម 100%",
+      "ប្រាក់បន្ថែម 10$",
+      "ប្រាក់បន្ថែម 5$",
+      "លេងម្ដងទៀត",
+  ];
 
-  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  const canvas = document.getElementById("wheelCanvas");
+  const ctx = canvas.getContext("2d");
+  const spinBtn = document.getElementById("spinBtn");
+  const resultText = document.getElementById("resultText");
 
-  <script>
-    const prizes = [
-      "ប្រាក់ប​ន្ថែម​ 100%",
-      "ប្រាក់ប​ន្ថែម 10$",
-      "ប្រាក់ប​ន្ថែម 5$",
-      "Try Again",
-       "ប្រាក់ប​ន្ថែម​ 100%",
-      "ប្រាក់ប​ន្ថែម 10$",
-      "ប្រាក់ប​ន្ថែម 5$",
-      "Try Again",
-    ];
+  let totalSegments = prizes.length;
+  let arc = (2 * Math.PI) / totalSegments;
+  let rotation = 0;
+  let spinning = false;
 
-    const wheel = document.getElementById("wheel");
-    const spinBtn = document.getElementById("spinBtn");
-    const agentBtn = document.getElementById("agentBtn");
-    const center = document.getElementById("center-result");
-    const centerPrize = document.getElementById("centerPrize");
-    const statusEl = document.getElementById("status");
+  function drawWheel() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const anglePer = 360 / prizes.length;
-    let currentRotation = 0;
-    let spinning = false;
-    let currentPrize = null;
+    for (let i = 0; i < totalSegments; i++) {
+      let angle = i * arc;
 
-    const tg = window.Telegram && window.Telegram.WebApp
-      ? window.Telegram.WebApp
-      : null;
-    if (tg) tg.expand();
+      // color
+      ctx.beginPath();
+      ctx.fillStyle = i % 2 === 0 ? "#4FC3F7" : "#81C784";
+      ctx.moveTo(canvas.width / 2, canvas.height / 2);
+      ctx.arc(canvas.width / 2, canvas.height / 2, 240, angle, angle + arc);
+      ctx.lineTo(canvas.width / 2, canvas.height / 2);
+      ctx.fill();
 
-    // read cid from URL (?cid=chat_id)
-    const params = new URLSearchParams(window.location.search);
-    const cidFromUrl = params.get("cid");
-
-    // build wheel
-    prizes.forEach((text, i) => {
-      const seg = document.createElement("div");
-      seg.className = "segment";
-      seg.style.transform =
-        `rotate(${i * anglePer}deg) skewY(${90 - anglePer}deg)`;
-      seg.textContent = text;
-      wheel.appendChild(seg);
-    });
-
-    function showCelebrate() {
-      const celebrate = document.createElement("div");
-      celebrate.id = "celebrate";
-      document.body.appendChild(celebrate);
-      celebrate.innerHTML = "";
-      celebrate.style.display = "block";
-      const emojis = ["🎉","🎊","✨","🎈","⭐"];
-
-      for (let i = 0; i < 25; i++) {
-        const span = document.createElement("span");
-        span.className = "confetti";
-        span.textContent = emojis[Math.floor(Math.random()*emojis.length)];
-        span.style.left = Math.random()*100 + "vw";
-        span.style.animationDelay = (Math.random()*0.7) + "s";
-        celebrate.appendChild(span);
-      }
-      setTimeout(() => celebrate.remove(), 2000);
+      // text
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.rotate(angle + arc / 2);
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#fff";
+      ctx.font = "20px Khmer OS Battambang";
+      ctx.fillText(prizes[i], 190, 10);
+      ctx.restore();
     }
+  }
 
-    spinBtn.onclick = () => {
-      if (spinning) return;
-      spinning = true;
-      spinBtn.disabled = true;
-      statusEl.textContent = "";
-      center.classList.remove("show");
+  drawWheel();
 
-      const randIndex = Math.floor(Math.random() * prizes.length);
-      const spins = 5;
-      const targetAngle =
-        spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
+  function spinWheel() {
+    if (spinning) return;
 
-      currentRotation += targetAngle;
-      wheel.style.transform = `rotate(${currentRotation}deg)`;
+    spinning = true;
+    spinBtn.disabled = true;
 
-      setTimeout(() => {
-        const prize = prizes[randIndex];
-        currentPrize = prize;
+    let randomSpin = Math.random() * 360 + 2000;
+    let finalRotation = rotation + randomSpin;
 
-        centerPrize.textContent = prize;
-        center.classList.add("show");
-        statusEl.textContent = "You won: " + prize + " 🎉";
-        showCelebrate();
+    let duration = 4000;
+    let start = null;
 
-        statusEl.textContent = "Sending to bot...";
-        autoClaim()
-          .then((ok) => {
-            if (ok) {
-              statusEl.textContent = "✅ Sent! Please check the chat.";
-            } else {
-              statusEl.textContent = "❌ Failed to send, please try again.";
-            }
-          })
-          .catch(err => {
-            console.error("Claim error:", err);
-            statusEl.textContent = "❌ Failed to send, please try again.";
-          })
-          .finally(() => {
-            if (tg) tg.close();
-          });
+    function animate(timestamp) {
+      if (!start) start = timestamp;
+      let progress = timestamp - start;
+      let easing = easeOut(progress / duration);
 
+      rotation = easing * finalRotation;
+      canvas.style.transform = `rotate(${rotation}deg)`;
+
+      if (progress < duration) {
+        requestAnimationFrame(animate);
+      } else {
         spinning = false;
         spinBtn.disabled = false;
-      }, 4000);
-    };
 
-    const agentUrl = "https://t.me/Hi2888CS1";
-    agentBtn.onclick = () => {
-      if (tg && tg.openTelegramLink) {
-        tg.openTelegramLink(agentUrl);
-      } else {
-        window.open(agentUrl, "_blank");
-      }
-    };
+        rotation = finalRotation % 360;
 
-    function autoClaim() {
-      const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
-      const userId = cidFromUrl || (webUser && webUser.id) || null;
+        let index = Math.floor(totalSegments - (rotation / 360) * totalSegments) % totalSegments;
+        let prize = prizes[index];
 
-      const basePayload = {
-        prize: currentPrize,
-        user_id: userId,
-      };
+        resultText.textContent = "🎉 អ្នកបានឈ្នះ: " + prize;
 
-      if (!userId) {
-        console.warn("No user_id/cid found, claim may fail.");
-      }
-
-      if (window.html2canvas) {
-        return html2canvas(document.getElementById("wheel-wrapper"))
-          .then(canvas => {
-            const dataUrl = canvas.toDataURL("image/png");
-            const payload = Object.assign({}, basePayload, { image: dataUrl });
-
-            return fetch("/claim", {
-              method: "POST",
-              headers: {"Content-Type":"application/json"},
-              body: JSON.stringify(payload)
-            });
-          })
-          .then(r => r && r.ok)
-          .catch(err => {
-            console.error("Screenshot failed, fallback:", err);
-            return fetch("/claim", {
-              method: "POST",
-              headers: {"Content-Type":"application/json"},
-              body: JSON.stringify(basePayload)
-            }).then(r => r && r.ok);
-          });
-      } else {
-        return fetch("/claim", {
-          method: "POST",
-          headers: {"Content-Type":"application/json"},
-          body: JSON.stringify(basePayload)
-        }).then(r => r && r.ok);
+        // call your existing autoClaim function
+        // autoClaim(prize);
       }
     }
-  </script>
+
+    requestAnimationFrame(animate);
+  }
+
+  function easeOut(t) {
+    return 1 - Math.pow(1 - t, 4);
+  }
+
+  spinBtn.onclick = spinWheel;
+</script>
+
 </body>
 </html>
