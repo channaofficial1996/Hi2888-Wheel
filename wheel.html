@@ -22,13 +22,15 @@
     }
     #emoji { font-size: 26px; }
 
+    /* pointer ចង្អុលចុះក្រោម */
     #pointer {
       width: 0;
       height: 0;
       border-left: 18px solid transparent;
       border-right: 18px solid transparent;
-      border-bottom: 30px solid #e53935;
+      border-top: 30px solid #e53935;
       margin: 10px auto;
+      transform: translateY(-8px);
     }
 
     #wheel-wrapper {
@@ -48,14 +50,12 @@
       transition: transform 4s cubic-bezier(.17,.67,.32,1.34);
     }
 
-    /* canvas នៅខាងក្នុង wheel */
     #wheelCanvas {
       width: 100%;
       height: 100%;
       display: block;
     }
 
-    /* .segment មិនបានប្រើទេ ប៉ុន្តែទុកចោលក៏មិនប៉ះពាល់អី */
     .segment {
       position: absolute;
       width: 50%;
@@ -160,7 +160,6 @@
 
   <div id="wheel-wrapper">
     <div id="wheel">
-      <!-- wheel គំនូរ​ដោយ canvas ដើម្បីអក្សរខ្មែរមើលស្អាត -->
       <canvas id="wheelCanvas" width="500" height="500"></canvas>
     </div>
 
@@ -204,7 +203,7 @@
     let spinning = false;
     let currentPrize = null;
 
-    // --- NEW: canvas variables for beautiful wheel ---
+    // canvas wheel
     const canvas = document.getElementById("wheelCanvas");
     const ctx = canvas.getContext("2d");
     const centerX = canvas.width / 2;
@@ -216,11 +215,10 @@
       const radPer = (Math.PI * 2) / prizes.length;
 
       for (let i = 0; i < prizes.length; i++) {
-        const startAngle = -Math.PI / 2 + i * radPer;  // ចាប់ពីលើ
+        const startAngle = -Math.PI / 2 + i * radPer;
         const endAngle   = startAngle + radPer;
         const midAngle   = (startAngle + endAngle) / 2;
 
-        // segment color
         ctx.beginPath();
         ctx.moveTo(centerX, centerY);
         ctx.arc(centerX, centerY, outerRadius, startAngle, endAngle);
@@ -228,7 +226,6 @@
         ctx.fillStyle = i % 2 === 0 ? "#42a5f5" : "#66bb6a";
         ctx.fill();
 
-        // Khmer text
         ctx.save();
         const textRadius = outerRadius - 40;
         ctx.translate(
@@ -244,20 +241,47 @@
         ctx.restore();
       }
     }
-
-    // គូរកង់ ១ដងពេល load
     drawWheel();
 
+    // Telegram WebApp
     const tg = window.Telegram && window.Telegram.WebApp
       ? window.Telegram.WebApp
       : null;
     if (tg) tg.expand();
 
-    // read cid from URL (?cid=chat_id)
+    // cid from URL
     const params = new URLSearchParams(window.location.search);
     const cidFromUrl = params.get("cid");
 
-    // (build wheel by divs ត្រូវបានដក ចេញហើយ ប្រើ canvas instead)
+    // ------- LIMIT 1 SPIN / DAY / USER -------
+    function getUserId() {
+      const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+      return cidFromUrl || (webUser && webUser.id) || null;
+    }
+
+    function canSpinToday() {
+      try {
+        const uid = getUserId();
+        if (!uid) return true;
+        const key = "wheel_spin_" + uid;
+        const today = new Date().toISOString().slice(0, 10);
+        const last = localStorage.getItem(key);
+        return last !== today;
+      } catch (e) {
+        return true;
+      }
+    }
+
+    function markSpunToday() {
+      try {
+        const uid = getUserId();
+        if (!uid) return;
+        const key = "wheel_spin_" + uid;
+        const today = new Date().toISOString().slice(0, 10);
+        localStorage.setItem(key, today);
+      } catch (e) {}
+    }
+    // -----------------------------------------
 
     function showCelebrate() {
       const celebrate = document.createElement("div");
@@ -279,6 +303,11 @@
     }
 
     spinBtn.onclick = () => {
+      if (!canSpinToday()) {
+        statusEl.textContent = "❌ អ្នកបាន SPIN រួចថ្ងៃនេះហើយ។ សូមរង់ចាំថ្ងៃបន្ទាប់!";
+        return;
+      }
+
       if (spinning) return;
       spinning = true;
       spinBtn.disabled = true;
@@ -287,8 +316,10 @@
 
       const randIndex = Math.floor(Math.random() * prizes.length);
       const spins = 5;
+
+      // pointer នៅខាងក្រោម
       const targetAngle =
-        spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
+        spins * 360 + (randIndex * anglePer + anglePer / 2);
 
       currentRotation += targetAngle;
       wheel.style.transform = `rotate(${currentRotation}deg)`;
@@ -301,6 +332,9 @@
         center.classList.add("show");
         statusEl.textContent = "You won: " + prize + " 🎉";
         showCelebrate();
+
+        // mark spun today
+        markSpunToday();
 
         statusEl.textContent = "Sending to bot...";
         autoClaim()
@@ -334,8 +368,7 @@
     };
 
     function autoClaim() {
-      const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
-      const userId = cidFromUrl || (webUser && webUser.id) || null;
+      const userId = getUserId();
 
       const basePayload = {
         prize: currentPrize,
