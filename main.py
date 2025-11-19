@@ -6,6 +6,7 @@ import os
 import time
 import base64
 import logging
+import re
 from datetime import datetime, date
 from io import BytesIO
 from threading import Thread
@@ -103,7 +104,7 @@ def send_photo(chat_id, photo, caption=None, parse_html=True, reply_markup=None)
 
 
 def send_spin_inline(chat_id: int):
-    """Send inline 'Open Spin Wheel' button (used by /start & 🎰 Spin)."""
+    """Send inline 'Open Spin Wheel' button (used by /start & 🎰 បង្វិលកង)."""
     wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=4_2_2"
     txt = "🎰 សូមស្វាគមន៍មកកាន់កម្មវិធីកង់រង្វាន់!\nចុចប៊ូតុងខាងក្រោម ដើម្បី បង្វិលកង 🎯"
     kb = {
@@ -255,33 +256,32 @@ def handle_update(update: dict):
             )
             return
 
-            # STEP 2: PHONE
-    if st["step"] == "ask_phone":
-        phone = text.strip()
+        # STEP 2: PHONE
+        if st["step"] == "ask_phone":
+            phone = text.strip()
 
-        if not phone:
-            send_message(chat_id, "📞 សូមវាយលេខទូរស័ព្ទម្តងទៀត។")
-            return
+            if not phone:
+                send_message(chat_id, "📞 សូមវាយលេខទូរស័ព្ទម្តងទៀត។")
+                return
 
-        # ✅ Validate phone number
-        # អនុញ្ញាត:
-        # +855881234567  /  +85510123456  /  0881234567  / 010123456
-        # => +855 + 8–9 digits  ឬ  0 + 8–9 digits
-        pattern = re.compile(r'^(?:\+855\d{8,9}|0\d{8,9})$')
+            # ✅ Validate phone number
+            # អនុញ្ញាត:
+            # +855881234567  /  +85510123456  /  0881234567  / 010123456
+            # => +855 + 8–9 digits  ឬ  0 + 8–9 digits
+            pattern = re.compile(r'^(?:\+855\d{8,9}|0\d{8,9})$')
 
-        if not pattern.match(phone):
-            send_message(
-                chat_id,
-                "📞 លេខទូរស័ព្ទមិនត្រឹមត្រូវ!\n"
-                "ឧទាហរណ៍ត្រឹមត្រូវ៖ +855881234567, +85510123456, 0881234567, 010123456\n"
-                "សូមវាយលេខទូរស័ព្ទម្ដងទៀត។"
-            )
-            return
+            if not pattern.match(phone):
+                send_message(
+                    chat_id,
+                    "📞 លេខទូរស័ព្ទមិនត្រឹមត្រូវ!\n"
+                    "ឧទាហរណ៍ត្រឹមត្រូវ៖ +855881234567, +85510123456, 0881234567, 010123456\n"
+                    "សូមវាយលេខទូរស័ព្ទម្ដងទៀត។"
+                )
+                return
 
-        # ✅ Valid → Save & go next
-        st["phone"] = phone
-        st["step"] = "done"
-
+            # ✅ Valid → Save & go next
+            st["phone"] = phone
+            st["step"] = "done"
 
             prize = st["prize"]
             photo_id = st["photo_id"]
@@ -361,12 +361,12 @@ def handle_update(update: dict):
 
     # --- NO STATE: handle new buttons ---
 
-    # Reply keyboard button: 🎰 Spin
-    if text == "🎰 កងបង្វិល":
+    # Reply keyboard button: 🎰 បង្វិលកង
+    if text == "🎰 បង្វិលកង":
         send_spin_inline(chat_id)
         return
 
-    # Reply keyboard button: ▶️ Start
+    # Reply keyboard button: ▶️ ចាប់ផ្តើម
     if text == "▶️ ចាប់ផ្តើម":
         send_start_message(chat_id)
         return
