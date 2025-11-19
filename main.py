@@ -105,10 +105,10 @@ def send_photo(chat_id, photo, caption=None, parse_html=True, reply_markup=None)
 def send_spin_inline(chat_id: int):
     """Send inline 'Open Spin Wheel' button (used by /start & 🎰 Spin)."""
     wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=4_2_2"
-    txt = "🎰 សូមស្វាគមន៍មកកាន់កម្មវិធីកង់រង្វាន់!\nចុចប៊ូតុងខាងក្រោម ដើម្បី SPIN 🎯"
+    txt = "🎰 សូមស្វាគមន៍មកកាន់កម្មវិធីកង់រង្វាន់!\nចុចប៊ូតុងខាងក្រោម ដើម្បី បង្វិលកង 🎯"
     kb = {
         "inline_keyboard": [
-            [{"text": "🎰 Open Spin Wheel", "web_app": {"url": wheel_url}}]
+            [{"text": "🎰 បង្វិលកងផ្សងសំណាង", "web_app": {"url": wheel_url}}]
         ]
     }
     send_message(chat_id, txt, reply_markup=kb)
@@ -141,7 +141,7 @@ def check_rate_limit(user_id: str):
 
     # Seconds limit
     if now - info["last"] < MIN_SECONDS_BETWEEN_CLAIMS:
-        return False, "⏳ សូមរង់ចាំបន្តិច មុនពេល SPIN ឡើងវិញ។"
+        return False, "⏳ សូមរង់ចាំបន្តិច មុនពេល បង្វិល ឡើងវិញ។"
 
     # Daily quota
     if info["count"] >= MAX_DAILY_CLAIMS:
@@ -276,8 +276,7 @@ def handle_update(update: dict):
                 f"🎁 Prize: <b>{prize}</b>\n"
                 f"👤 Name: <b>{st['full_name']}</b>\n"
                 f"📞 Phone: <b>{phone}</b>\n\n"
-                "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ ❤️\n"
-                "បើចង់ទាក់ទងភ្នាក់ងារទាន់ចិត្ត៖"
+                "ចុចប៊ូតុងខាក្រោមដើម្បីទំនាក់ទំនងភ្នាក់ងារ"
             )
 
             kb_user = {
