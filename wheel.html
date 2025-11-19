@@ -22,7 +22,7 @@
     }
     #emoji { font-size: 26px; }
 
-    /* pointer ចង្អុលចុះក្រោម */
+    /* pointer ក្រហមនៅលើ ចង្អុលចុះក្រោម */
     #pointer {
       width: 0;
       height: 0;
@@ -55,25 +55,6 @@
       height: 100%;
       display: block;
     }
-
-    .segment {
-      position: absolute;
-      width: 50%;
-      height: 50%;
-      top: 50%;
-      left: 50%;
-      transform-origin: 0% 0%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 11px;
-      text-align: center;
-      color: #fff;
-      padding: 4px;
-      box-sizing: border-box;
-    }
-    .segment:nth-child(odd)  { background:#42a5f5; }
-    .segment:nth-child(even) { background:#66bb6a; }
 
     #center-result {
       position: absolute;
@@ -177,6 +158,16 @@
 
   <p id="status"></p>
 
+  <!-- 🔊 Start spin sound (បងដាក់ spin.mp3 របស់ខ្លួននៅ path ខាងក្រោម) -->
+  <audio id="spinSound">
+    <source src="/static/sounds/spin.mp3" type="audio/mpeg">
+  </audio>
+
+  <!-- 🔊 Jackpot / Win sound -->
+  <audio id="jackpotSound">
+    <source src="/static/sounds/jackpot.mp3" type="audio/mpeg">
+  </audio>
+
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
   <script>
@@ -198,12 +189,15 @@
     const centerPrize = document.getElementById("centerPrize");
     const statusEl = document.getElementById("status");
 
+    const spinSoundEl = document.getElementById("spinSound");
+    const jackpotSoundEl = document.getElementById("jackpotSound");
+
     const anglePer = 360 / prizes.length;
     let currentRotation = 0;
     let spinning = false;
     let currentPrize = null;
 
-    // canvas wheel
+    // ---------- Canvas wheel (Khmer text) ----------
     const canvas = document.getElementById("wheelCanvas");
     const ctx = canvas.getContext("2d");
     const centerX = canvas.width / 2;
@@ -243,17 +237,16 @@
     }
     drawWheel();
 
-    // Telegram WebApp
+    // ---------- Telegram WebApp ----------
     const tg = window.Telegram && window.Telegram.WebApp
       ? window.Telegram.WebApp
       : null;
     if (tg) tg.expand();
 
-    // cid from URL
     const params = new URLSearchParams(window.location.search);
     const cidFromUrl = params.get("cid");
 
-    // ------- LIMIT 1 SPIN / DAY / USER -------
+    // ---------- LIMIT 1 SPIN / DAY / USER ----------
     function getUserId() {
       const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
       return cidFromUrl || (webUser && webUser.id) || null;
@@ -281,7 +274,7 @@
         localStorage.setItem(key, today);
       } catch (e) {}
     }
-    // -----------------------------------------
+    // ------------------------------------------------
 
     function showCelebrate() {
       const celebrate = document.createElement("div");
@@ -314,13 +307,18 @@
       statusEl.textContent = "";
       center.classList.remove("show");
 
+      // 🔊 Start spin sound
+      if (spinSoundEl) {
+        spinSoundEl.currentTime = 0;
+        spinSoundEl.play().catch(() => {});
+      }
+
       const randIndex = Math.floor(Math.random() * prizes.length);
       const spins = 5;
 
-      // pointer នៅខាងក្រោម
-  const targetAngle =
-  spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
-
+      // pointer នៅលើ (arrow ចង្អុលចុះ) → ប្រើ formula ចាស់
+      const targetAngle =
+        spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
 
       currentRotation += targetAngle;
       wheel.style.transform = `rotate(${currentRotation}deg)`;
@@ -333,6 +331,12 @@
         center.classList.add("show");
         statusEl.textContent = "You won: " + prize + " 🎉";
         showCelebrate();
+
+        // 🔊 Jackpot sound
+        if (jackpotSoundEl) {
+          jackpotSoundEl.currentTime = 0;
+          jackpotSoundEl.play().catch(() => {});
+        }
 
         // mark spun today
         markSpunToday();
