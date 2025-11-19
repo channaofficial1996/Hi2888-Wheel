@@ -41,8 +41,8 @@ user_limits = {}      # user_id -> rate-limit info
 MAIN_KEYBOARD = {
     "keyboard": [
         [
-            {"text": "🎰 Spin"},
-            {"text": "▶️ Start"},
+            {"text": "🎰 បង្វិលកង"},
+            {"text": "▶️ ចាប់ផ្តើម"},
         ]
     ],
     "resize_keyboard": True,
@@ -145,7 +145,7 @@ def check_rate_limit(user_id: str):
 
     # Daily quota
     if info["count"] >= MAX_DAILY_CLAIMS:
-        return False, "🚫 ពេញកូតាប្រចាំថ្ងៃ! សូមមកលេងម្ដងទៀតថ្ងៃស្អែក។"
+        return False, "🚫 ការបង្វិលប្រចាំថ្ងៃពេញហើយ! សូមមកលេងម្ដងទៀតថ្ងៃស្អែក។"
 
     info["last"] = now
     info["count"] += 1
@@ -183,7 +183,7 @@ def claim():
         send_message(
             user_id,
             "🏁 លទ្ធផលរង្វាន់៖ <b>Try Again</b>\n\n"
-            "សូមសាកល្បងម្ដងទៀត nhé! 🍀",
+            "សូមសាកល្បងម្ដងទៀត!",
         )
         return jsonify({"ok": True})
 
@@ -255,15 +255,33 @@ def handle_update(update: dict):
             )
             return
 
-        # STEP 2: PHONE
-        if st["step"] == "ask_phone":
-            phone = text.strip()
-            if not phone:
-                send_message(chat_id, "📞 សូមវាយលេខទូរស័ព្ទម្តងទៀត។")
-                return
+            # STEP 2: PHONE
+    if st["step"] == "ask_phone":
+        phone = text.strip()
 
-            st["phone"] = phone
-            st["step"] = "done"
+        if not phone:
+            send_message(chat_id, "📞 សូមវាយលេខទូរស័ព្ទម្តងទៀត។")
+            return
+
+        # ✅ Validate phone number
+        # អនុញ្ញាត:
+        # +855881234567  /  +85510123456  /  0881234567  / 010123456
+        # => +855 + 8–9 digits  ឬ  0 + 8–9 digits
+        pattern = re.compile(r'^(?:\+855\d{8,9}|0\d{8,9})$')
+
+        if not pattern.match(phone):
+            send_message(
+                chat_id,
+                "📞 លេខទូរស័ព្ទមិនត្រឹមត្រូវ!\n"
+                "ឧទាហរណ៍ត្រឹមត្រូវ៖ +855881234567, +85510123456, 0881234567, 010123456\n"
+                "សូមវាយលេខទូរស័ព្ទម្ដងទៀត។"
+            )
+            return
+
+        # ✅ Valid → Save & go next
+        st["phone"] = phone
+        st["step"] = "done"
+
 
             prize = st["prize"]
             photo_id = st["photo_id"]
@@ -292,7 +310,7 @@ def handle_update(update: dict):
 
             # -------- Report to group (with Contact User button) --------
             rep = [
-                "🎁 New Prize Claim",
+                "🎁 សមាជិកថ្មីទទួលបានរង្វាន់",
                 f"📅 {now}",
                 f"🆔 User ID: {uid}",
                 f"👤 Full name: <b>{st['full_name']}</b>",
@@ -309,7 +327,7 @@ def handle_update(update: dict):
                 "inline_keyboard": [
                     [
                         {
-                            "text": "🔗 Message User",
+                            "text": "📤 ទំនាក់ទំនងទៅ សមាជិក",
                             "url": f"tg://user?id={uid}",
                         }
                     ]
@@ -344,12 +362,12 @@ def handle_update(update: dict):
     # --- NO STATE: handle new buttons ---
 
     # Reply keyboard button: 🎰 Spin
-    if text == "🎰 Spin":
+    if text == "🎰 កងបង្វិល":
         send_spin_inline(chat_id)
         return
 
     # Reply keyboard button: ▶️ Start
-    if text == "▶️ Start":
+    if text == "▶️ ចាប់ផ្តើម":
         send_start_message(chat_id)
         return
 
