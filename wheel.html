@@ -1,395 +1,439 @@
-# main.py — 2888 Wheel v5.0
-# - Flask run on port 8080
-# - /wheel serve wheel.html
-# - /claim ពី WebApp -> DM (Screenshot + Prize + Name + Phone)
-#   -> Report ទៅ Group (រួមមាន link & button View User)
-#
-# ENV (Railway Variables):
-#   BOT_TOKEN         = "....."
-#   WEBAPP_URL        = "https://web-production-f91a3.up.railway.app"
-#   TARGET_GROUP_ID   = "-1003317283401"
-#   MAX_DAILY_CLAIMS  = "20"          (optional)
-#   MIN_SECONDS_BETWEEN_CLAIMS = "60" (optional)
-
-import os
-import time
-import base64
-import logging
-import json
-from datetime import datetime, date
-from io import BytesIO
-from threading import Thread
-
-import requests
-from flask import Flask, request, jsonify, send_from_directory
-
-# ---------- ENV ----------
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBAPP_URL = (os.getenv("WEBAPP_URL") or "").rstrip("/")
-TARGET_GROUP_ID = os.getenv("TARGET_GROUP_ID")
-
-MAX_DAILY_CLAIMS = int(os.getenv("MAX_DAILY_CLAIMS", "20"))
-MIN_SECONDS_BETWEEN_CLAIMS = int(os.getenv("MIN_SECONDS_BETWEEN_CLAIMS", "60"))
-
-if not BOT_TOKEN:
-    raise RuntimeError("BOT_TOKEN not set")
-if not WEBAPP_URL:
-    raise RuntimeError("WEBAPP_URL not set")
-if not TARGET_GROUP_ID:
-    raise RuntimeError("TARGET_GROUP_ID not set")
-
-API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-
-logging.basicConfig(level=logging.INFO)
-log = logging.getLogger("wheelbot-v5-0")
-
-# user_id -> state
-user_states = {}      # state flow: ask_name -> ask_phone
-# user_id -> counters
-user_limits = {}      # {"last_ts": float, "day": "YYYY-MM-DD", "count": int}
-
-# ---------- Telegram helpers ----------
-def tg_request(method: str, params: dict = None, files: dict = None):
-    url = f"{API_URL}/{method}"
-    try:
-        if files:
-            r = requests.post(url, data=params or {}, files=files, timeout=30)
-        else:
-            r = requests.post(url, json=params or {}, timeout=30)
-        if not r.ok:
-            log.error("Telegram API error %s: %s", method, r.text)
-        return r.json()
-    except Exception as e:
-        log.exception("Telegram request failed: %s", e)
-        return None
-
-
-def send_message(chat_id, text, reply_markup=None, parse_html: bool = True):
-    params = {
-        "chat_id": chat_id,
-        "text": text,
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Spin Wheel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      font-family: "Khmer OS Battambang", "Hanuman",
+        system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
     }
-    if parse_html:
-        params["parse_mode"] = "HTML"
-    if reply_markup:
-        params["reply_markup"] = reply_markup
-    return tg_request("sendMessage", params)
-
-
-def send_photo(chat_id, photo, caption=None, reply_markup=None):
-    """
-    photo អាចជា file_id (str) ឬ BytesIO.
-    Caption នៅទីនេះ យើងអាចប្រើ HTML តាម parse_mode លំនាំដើមរបស់ Telegram (Caption HTML)។
-    reply_markup អាចជា InlineKeyboardMarkup (dict) សម្រាប់ប៊ូតុង។
-    """
-    # case: ប្រើ file_id string
-    if isinstance(photo, str) and not hasattr(photo, "read"):
-        params = {
-            "chat_id": chat_id,
-            "photo": photo,
-        }
-        if caption:
-            params["caption"] = caption
-            params["parse_mode"] = "HTML"
-        if reply_markup:
-            params["reply_markup"] = reply_markup
-        return tg_request("sendPhoto", params)
-    else:
-        # case: upload file (BytesIO)
-        files = {"photo": ("wheel.png", photo, "image/png")}
-        params = {"chat_id": chat_id}
-        if caption:
-            params["caption"] = caption
-            params["parse_mode"] = "HTML"
-        if reply_markup:
-            # multipart ត្រូវការ JSON string
-            params["reply_markup"] = json.dumps(reply_markup)
-        return tg_request("sendPhoto", params, files=files)
-
-
-def send_start_message(chat_id: int):
-    wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=5_0"
-    text = (
-        "🎰 សូមស្វាគមន៍មកកាន់កម្មវិធីកង់រង្វាន់!\n"
-        "ចុចប៊ូតុងខាងក្រោម ដើម្បីចាប់ផ្តើម SPIN Wheel 🎯"
-    )
-    reply_markup = {
-        "inline_keyboard": [
-            [
-                {
-                    "text": "🎰 Open Spin Wheel",
-                    "web_app": {"url": wheel_url},
-                }
-            ]
-        ]
+    h2 {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
     }
-    send_message(chat_id, text, reply_markup=reply_markup)
+    #emoji { font-size: 26px; }
 
-
-def check_rate_limit(user_id: str):
-    """បងារ Claim ជាធម្មតា: limit seconds និង limit per day."""
-    now_ts = time.time()
-    today = date.today().isoformat()
-
-    info = user_limits.get(user_id)
-    if not info:
-        info = {"last_ts": 0.0, "day": today, "count": 0}
-        user_limits[user_id] = info
-
-    # reset count បើថ្ងៃថ្មី
-    if info["day"] != today:
-        info["day"] = today
-        info["count"] = 0
-
-    # second-based limit
-    if now_ts - info["last_ts"] < MIN_SECONDS_BETWEEN_CLAIMS:
-        return False, "⏳ សូមរង់ចាំបន្តិច មុនពេល SPIN ឡើងវិញ។"
-
-    # daily count limit
-    if info["count"] >= MAX_DAILY_CLAIMS:
-        return False, "🚫 អ្នកបានលេងពេញកូតាប្រចាំថ្ងៃរួចហើយ។ សូមមកលេងម្ដងទៀតថ្ងៃស្អែក។"
-
-    # OK
-    info["last_ts"] = now_ts
-    info["count"] += 1
-    return True, None
-
-# ---------- Flask app ----------
-app = Flask(__name__)
-
-
-@app.route("/")
-def index():
-    return "Spin Wheel Telegram Bot v5.0 is running ✅"
-
-
-@app.route("/wheel")
-def wheel_page():
-    # serve wheel.html ជា static file (ដាក់ឯកសារនេះនៅថតដូច main.py)
-    return send_from_directory(".", "wheel.html")
-
-
-@app.route("/claim", methods=["POST"])
-def claim():
-    """
-    JSON ត្រូវមកពី wheel.html:
-    {
-      "user_id": 5529...,
-      "prize": "Lucky Spin x2",
-      "image": "data:image/png;base64,...."
-    }
-    """
-    data = request.get_json(force=True, silent=True) or {}
-    user_id = data.get("user_id")
-    prize = data.get("prize")
-    image_data_url = data.get("image")
-
-    if not user_id:
-        log.error("/claim missing user_id: %s", data)
-        return jsonify({"ok": False, "error": "missing user_id"}), 400
-
-    user_id_str = str(user_id)
-    log.info("Received claim from %s: %s", user_id_str, prize)
-
-    # បើ prize = Try Again -> មិនចូល flow សួរឈ្មោះ/លេខ
-    if isinstance(prize, str) and prize.strip().lower() == "try again":
-        log.info("Prize is 'Try Again' -> skip claim flow.")
-        return jsonify({"ok": True})
-
-    # Rate-limit & daily quota
-    ok, msg = check_rate_limit(user_id_str)
-    if not ok:
-        send_message(user_id, msg, parse_html=False)
-        return jsonify({"ok": False, "error": "rate_limited"}), 429
-
-    photo_id = None
-
-    # Decode & send screenshot (optional but recommended)
-    if image_data_url and image_data_url.startswith("data:image"):
-        try:
-            header, b64 = image_data_url.split(",", 1)
-            img_bytes = base64.b64decode(b64)
-            bio = BytesIO(img_bytes)
-            bio.name = "wheel.png"
-
-            cap = f"🎰 លទ្ធផលកង់រង្វាន់របស់អ្នក: <b>{prize}</b>"
-            resp = send_photo(user_id, bio, caption=cap)
-            if resp and resp.get("ok"):
-                ph = resp["result"]["photo"]
-                photo_id = ph[-1]["file_id"]
-        except Exception as e:
-            log.exception("Failed to decode/send screenshot: %s", e)
-
-    # Save state: បន្ទាប់សួរឈ្មោះ
-    user_states[user_id_str] = {
-        "step": "ask_name",
-        "prize": prize,
-        "photo_id": photo_id,
-        "created_at": time.time(),
+    /* pointer at top, pointing down */
+    #pointer {
+      width: 0;
+      height: 0;
+      border-left: 18px solid transparent;
+      border-right: 18px solid transparent;
+      border-top: 30px solid #e53935;
+      margin: 10px auto;
+      transform: translateY(-8px);
     }
 
-    # sleep តិចៗ ដើម្បី WebApp បិទសិន
-    time.sleep(1.0)
+    #wheel-wrapper {
+      position: relative;
+      width: 280px;
+      height: 280px;
+      margin: 10px auto 12px;
+    }
+    #wheel {
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      border: 6px solid #333;
+      position: relative;
+      overflow: hidden;
+      background: #ffffff;
+      transition: transform 4s cubic-bezier(.17,.67,.32,1.34);
+    }
 
-    # Ask full name
-    text = (
-        f"🎉 អបអរសាទរ! អ្នកទទួលបានរង្វាន់៖ <b>{prize}</b> 🎁\n\n"
-        "✍ សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> របស់អ្នក។"
-    )
-    send_message(user_id, text, parse_html=True)
+    #wheelCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
 
-    return jsonify({"ok": True})
+    #center-result {
+      position: absolute;
+      inset: 25%;
+      border-radius: 50%;
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      padding: 10px;
+      box-sizing: border-box;
+      opacity: 0;
+      transform: scale(0.5);
+      pointer-events: none;
+      transition: all 0.35s ease-out;
+    }
+    #center-result.show {
+      opacity: 1;
+      transform: scale(1);
+      pointer-events: auto;
+    }
+    #center-result .label { font-size: 12px; opacity: 0.8; margin-bottom: 4px; }
+    #center-result .prize-text { font-size: 18px; font-weight: 700; text-align: center; }
 
+    #spinBtn {
+      padding: 12px 30px;
+      font-size: 16px;
+      border-radius: 999px;
+      border: none;
+      background: #ff9800;
+      color: #fff;
+      cursor: pointer;
+      min-width: 140px;
+    }
+    #spinBtn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-# ---------- Telegram long-poll ----------
-def handle_update(update: dict):
-    if "message" not in update:
-        return
+    .bottom-row {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 12px;
+    }
+    .btn {
+      padding: 10px 16px;
+      border-radius: 999px;
+      border: none;
+      font-size: 14px;
+      cursor: pointer;
+      min-width: 140px;
+      color: #fff;
+    }
+    #agentBtn { background:#1976d2; }
 
-    msg = update["message"]
-    chat = msg.get("chat", {})
-    chat_id = chat.get("id")
-    text = msg.get("text", "")
-    from_user = msg.get("from", {})
-    user_id = from_user.get("id")
-    user_id_str = str(user_id)
+    #status {
+      margin-top: 10px;
+      font-size: 14px;
+      font-weight: 500;
+    }
 
-    # Commands
-    if isinstance(text, str) and text.startswith("/start"):
-        send_start_message(chat_id)
-        return
+    #celebrate {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 50;
+      font-size: 24px;
+      display: none;
+    }
+    .confetti {
+      position: absolute;
+      animation: fall 1.5s linear forwards;
+    }
+    @keyframes fall {
+      from { transform: translateY(-40px) rotate(0deg); opacity: 1; }
+      to   { transform: translateY(120vh) rotate(360deg); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <h2><span id="emoji">🎰</span><span>Spin & Win</span></h2>
+  <div id="pointer"></div>
 
-    # Only handle text for state machine
-    if not isinstance(text, str):
-        return
+  <div id="wheel-wrapper">
+    <div id="wheel">
+      <canvas id="wheelCanvas" width="500" height="500"></canvas>
+    </div>
 
-    state = user_states.get(user_id_str)
-    if not state:
-        # no active claim for this user
-        return
+    <div id="center-result">
+      <div class="label">You won</div>
+      <div class="prize-text" id="centerPrize">-</div>
+    </div>
+  </div>
 
-    step = state.get("step")
+  <button id="spinBtn">SPIN</button>
 
-    # ----- STEP 1: Ask name -----
-    if step == "ask_name":
-        full_name = text.strip()
-        if not full_name:
-            send_message(chat_id, "🙏 សូមវាយបញ្ចូល <b>ឈ្មោះពេញ</b> ម្តងទៀត។")
-            return
+  <div class="bottom-row">
+    <button id="agentBtn" class="btn">💬 Contact Agent</button>
+  </div>
 
-        state["full_name"] = full_name
-        state["step"] = "ask_phone"
+  <p id="status"></p>
 
-        send_message(
-            chat_id,
-            f"✅ បានឈ្មោះ៖ <b>{full_name}</b>\n\n"
-            "📞 សូមវាយបញ្ចូល <b>លេខទូរស័ព្ទ</b> របស់អ្នក។",
-        )
-        return
+  <!-- 🔊 Spin start sound -->
+  <audio id="spinSound">
+    <source src="/mnt/data/mixkit-bike-wheel-spinning-1613.wav" type="audio/wav">
+  </audio>
 
-    # ----- STEP 2: Ask phone -----
-    if step == "ask_phone":
-        phone = text.strip()
-        if not phone:
-            send_message(chat_id, "📞 សូមវាយបញ្ចូលលេខទូរស័ព្ទម្តងទៀត។")
-            return
+  <!-- 🔊 Jackpot sound -->
+  <audio id="jackpotSound">
+    <source src="/mnt/data/mixkit-cheering-crowd-loud-whistle-610.wav" type="audio/wav">
+  </audio>
 
-        state["phone"] = phone
-        state["step"] = "done"
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
-        prize = state.get("prize", "-")
-        photo_id = state.get("photo_id")
-        username = from_user.get("username")
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+  <script>
+    const prizes = [
+      "ប្រាក់បន្ថែម 100%",
+      "ប្រាក់បន្ថែម 10$",
+      "ប្រាក់បន្ថែម 5$",
+      "Try Again",
+      "ប្រាក់បន្ថែម 100%",
+      "ប្រាក់បន្ថែម 10$",
+      "ប្រាក់បន្ថែម 5$",
+      "Try Again",
+    ];
 
-        # --------- Final confirm to USER (with Telegram + Messenger buttons) ---------
-        final_text = (
-            "🎉 <b>បញ្ជាក់ទទួលបានរង្វាន់ជោគជ័យ!</b>\n\n"
-            f"🎁 Prize: <b>{prize}</b>\n"
-            f"👤 Name: <b>{state['full_name']}</b>\n"
-            f"📞 Phone: <b>{phone}</b>\n\n"
-            "សូមរង់ចាំភ្នាក់ងារទាក់ទងមកវិញ ❤️\n"
-            "បើចង់ទាក់ទងភ្នាក់ងារទាន់ចិត្ត៖"
-        )
+    const wheel = document.getElementById("wheel");
+    const spinBtn = document.getElementById("spinBtn");
+    const agentBtn = document.getElementById("agentBtn");
+    const center = document.getElementById("center-result");
+    const centerPrize = document.getElementById("centerPrize");
+    const statusEl = document.getElementById("status");
 
-        contact_keyboard_user = {
-            "inline_keyboard": [
-                [
-                    {"text": "💬 Telegram", "url": "https://t.me/chana_on"},
-                    {"text": "📩 Messenger", "url": "https://m.me/your_page_here"},
-                ]
-            ]
+    const spinSoundEl = document.getElementById("spinSound");
+    const jackpotSoundEl = document.getElementById("jackpotSound");
+
+    const anglePer = 360 / prizes.length;
+    let currentRotation = 0;
+    let spinning = false;
+    let currentPrize = null;
+
+    // CANVAS
+    const canvas = document.getElementById("wheelCanvas");
+    const ctx = canvas.getContext("2d");
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2;
+    const outerRadius = Math.min(centerX, centerY) - 5;
+
+    function drawWheel() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const radPer = (Math.PI * 2) / prizes.length;
+
+      for (let i = 0; i < prizes.length; i++) {
+        const startAngle = -Math.PI / 2 + i * radPer;
+        const endAngle   = startAngle + radPer;
+        const midAngle   = (startAngle + endAngle) / 2;
+
+        ctx.beginPath();
+        ctx.moveTo(centerX, centerY);
+        ctx.arc(centerX, centerY, outerRadius, startAngle, endAngle);
+        ctx.closePath();
+        ctx.fillStyle = i % 2 === 0 ? "#42a5f5" : "#66bb6a";
+        ctx.fill();
+
+        ctx.save();
+        const textRadius = outerRadius - 40;
+        ctx.translate(
+          centerX + Math.cos(midAngle) * textRadius,
+          centerY + Math.sin(midAngle) * textRadius
+        );
+        ctx.rotate(midAngle + Math.PI / 2);
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = '18px "Khmer OS Battambang","Hanuman",system-ui,sans-serif';
+        ctx.fillText(prizes[i], 0, 0);
+        ctx.restore();
+      }
+    }
+    drawWheel();
+
+    // Telegram WebApp
+    const tg = window.Telegram && window.Telegram.WebApp
+      ? window.Telegram.WebApp
+      : null;
+    if (tg) tg.expand();
+
+    const params = new URLSearchParams(window.location.search);
+    const cidFromUrl = params.get("cid");
+
+    // ⭐⭐⭐ LIMIT SPIN / DAY (កំណត់នៅទីនេះ)
+    const SPINS_PER_DAY = 3; // ⬅⬅⬅ កែលេខនេះដើម្បីកំណត់ចំនួន spin / 1ថ្ងៃ / 1 user
+
+    function getUserId() {
+      const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
+      return cidFromUrl || (webUser && webUser.id) || null;
+    }
+
+    // N ដងក្នុង 1ថ្ងៃ
+    function canSpinToday() {
+      try {
+        const uid = getUserId();
+        if (!uid) return true;
+
+        const countKey = "wheel_spin_count_" + uid;
+        const dateKey  = "wheel_spin_date_" + uid;
+
+        const today = new Date().toISOString().slice(0, 10);
+        const lastDate = localStorage.getItem(dateKey);
+        let count = Number(localStorage.getItem(countKey) || 0);
+
+        // ថ្ងៃថ្មី → reset count
+        if (lastDate !== today) {
+          localStorage.setItem(dateKey, today);
+          localStorage.setItem(countKey, "0");
+          return true;
         }
 
-        send_message(chat_id, final_text, reply_markup=contact_keyboard_user)
+        return count < SPINS_PER_DAY;
+      } catch (e) {
+        return true;
+      }
+    }
 
-        # --------- Report to GROUP (with clickable User ID + View User button) ---------
-        lines = [
-            "🎁 <b>New Prize Claim</b>",
-            "",
-            f"📅 Date/Time (Bangkok): <b>{now_str}</b>",
-            f"🆔 User ID: <a href=\"tg://user?id={user_id_str}\">{user_id_str}</a>",
-            f"👤 Full name: <b>{state['full_name']}</b>",
-            f"📞 Phone: <b>{phone}</b>",
-            f"🎯 Prize: <b>{prize}</b>",
-        ]
-        if username:
-            lines.append(f"📛 Username: @{username}")
+    function markSpunToday() {
+      try {
+        const uid = getUserId();
+        if (!uid) return;
 
-        report_html = "\n".join(lines)
+        const countKey = "wheel_spin_count_" + uid;
+        const dateKey  = "wheel_spin_date_" + uid;
 
-        view_user_keyboard = {
-            "inline_keyboard": [
-                [
-                    {
-                        "text": "🔍 View User",
-                        "url": f"tg://user?id={user_id_str}",
-                    }
-                ]
-            ]
+        const today = new Date().toISOString().slice(0, 10);
+        const lastDate = localStorage.getItem(dateKey);
+
+        if (lastDate !== today) {
+          localStorage.setItem(dateKey, today);
+          localStorage.setItem(countKey, "1");
+        } else {
+          let count = Number(localStorage.getItem(countKey) || 0);
+          localStorage.setItem(countKey, String(count + 1));
         }
+      } catch (e) {}
+    }
 
-        if photo_id:
-            send_photo(TARGET_GROUP_ID, photo_id, caption=report_html, reply_markup=view_user_keyboard)
-        else:
-            send_message(
-                TARGET_GROUP_ID,
-                report_html,
-                reply_markup=view_user_keyboard,
-                parse_html=True,
-            )
+    function showCelebrate() {
+      const celebrate = document.createElement("div");
+      celebrate.id = "celebrate";
+      document.body.appendChild(celebrate);
+      celebrate.innerHTML = "";
+      celebrate.style.display = "block";
+      const emojis = ["🎉","🎊","✨","🎈","⭐"];
 
-        # Clear state
-        user_states.pop(user_id_str, None)
+      for (let i = 0; i < 25; i++) {
+        const span = document.createElement("span");
+        span.className = "confetti";
+        span.textContent = emojis[Math.floor(Math.random()*emojis.length)];
+        span.style.left = Math.random()*100 + "vw";
+        span.style.animationDelay = (Math.random()*0.7) + "s";
+        celebrate.appendChild(span);
+      }
+      setTimeout(() => celebrate.remove(), 2000);
+    }
 
+    spinBtn.onclick = () => {
 
-def run_bot_loop():
-    log.info("🚀 Bot long-polling loop started")
-    offset = None
-    while True:
-        try:
-            resp = requests.get(
-                f"{API_URL}/getUpdates",
-                params={"timeout": 50, "offset": offset},
-                timeout=60,
-            ).json()
-        except Exception as e:
-            log.exception("getUpdates failed: %s", e)
-            time.sleep(3)
-            continue
+      if (!canSpinToday()) {
+        statusEl.textContent = "❌ អ្នកបាន SPIN អស់កូត quota ថ្ងៃនេះហើយ!";
+        return;
+      }
 
-        if not resp.get("ok"):
-            log.error("getUpdates error: %s", resp)
-            time.sleep(3)
-            continue
+      if (spinning) return;
+      spinning = true;
+      spinBtn.disabled = true;
+      statusEl.textContent = "";
+      center.classList.remove("show");
 
-        for upd in resp.get("result", []):
-            offset = upd["update_id"] + 1
-            handle_update(upd)
+      // 🔊 Spin start sound
+      spinSoundEl.currentTime = 0;
+      spinSoundEl.play().catch(()=>{});
 
+      const randIndex = Math.floor(Math.random() * prizes.length);
+      const spins = 5;
 
-if __name__ == "__main__":
-    # Run polling + Flask in single process
-    Thread(target=run_bot_loop, daemon=True).start()
-    log.info("🌐 Flask running on port 8080")
-    app.run(host="0.0.0.0", port=8080)
+      const targetAngle =
+        spins * 360 + (360 - randIndex * anglePer - anglePer / 2);
+
+      currentRotation += targetAngle;
+      wheel.style.transform = `rotate(${currentRotation}deg)`;
+
+      setTimeout(() => {
+        const prize = prizes[randIndex];
+        currentPrize = prize;
+
+        centerPrize.textContent = prize;
+        center.classList.add("show");
+        statusEl.textContent = "You won: " + prize + " 🎉";
+        showCelebrate();
+
+        // 🔊 Jackpot sound
+        jackpotSoundEl.currentTime = 0;
+        jackpotSoundEl.play().catch(()=>{});
+
+        // increase count today
+        markSpunToday();
+
+        statusEl.textContent = "Sending to bot...";
+        autoClaim()
+          .then((ok) => {
+            if (ok) {
+              statusEl.textContent = "✅ Sent! Please check the chat.";
+            } else {
+              statusEl.textContent = "❌ Failed to send, please try again.";
+            }
+          })
+          .catch(err => {
+            console.error("Claim error:", err);
+            statusEl.textContent = "❌ Failed to send, please try again.";
+          })
+          .finally(() => {
+            if (tg) tg.close();
+          });
+
+        spinning = false;
+        spinBtn.disabled = false;
+      }, 4000);
+    };
+
+    const agentUrl = "https://t.me/Hi2888CS1";
+    agentBtn.onclick = () => {
+      if (tg && tg.openTelegramLink) {
+        tg.openTelegramLink(agentUrl);
+      } else {
+        window.open(agentUrl, "_blank");
+      }
+    };
+
+    function autoClaim() {
+      const userId = getUserId();
+
+      const basePayload = {
+        prize: currentPrize,
+        user_id: userId,
+      };
+
+      if (!userId) {
+        console.warn("No user_id/cid found, claim may fail.");
+      }
+
+      if (window.html2canvas) {
+        return html2canvas(document.getElementById("wheel-wrapper"))
+          .then(canvas => {
+            const dataUrl = canvas.toDataURL("image/png");
+            const payload = Object.assign({}, basePayload, { image: dataUrl });
+
+            return fetch("/claim", {
+              method: "POST",
+              headers: {"Content-Type":"application/json"},
+              body: JSON.stringify(payload)
+            });
+          })
+          .then(r => r && r.ok)
+          .catch(err => {
+            console.error("Screenshot failed, fallback:", err);
+            return fetch("/claim", {
+              method: "POST",
+              headers: {"Content-Type":"application/json"},
+              body: JSON.stringify(basePayload)
+            }).then(r => r && r.ok);
+          });
+      } else {
+        return fetch("/claim", {
+          method: "POST",
+          headers: {"Content-Type":"application/json"},
+          body: JSON.stringify(basePayload)
+        }).then(r => r && r.ok);
+      }
+    }
+  </script>
+</body>
+</html>
