@@ -63,19 +63,24 @@ def send_message(chat_id, text, reply_markup=None, parse_html=True):
     return tg_request("sendMessage", params)
 
 
-def send_photo(chat_id, photo, caption=None):
+def send_photo(chat_id, photo, caption=None, parse_html=True):
+    # case 1: file_id string
     if isinstance(photo, str) and not hasattr(photo, "read"):
         params = {"chat_id": chat_id, "photo": photo}
         if caption:
             params["caption"] = caption
+            if parse_html:
+                params["parse_mode"] = "HTML"
         return tg_request("sendPhoto", params)
 
+    # case 2: BytesIO image
     files = {"photo": ("wheel.png", photo, "image/png")}
     params = {"chat_id": chat_id}
     if caption:
         params["caption"] = caption
+        if parse_html:
+            params["parse_mode"] = "HTML"
     return tg_request("sendPhoto", params, files=files)
-
 
 def send_start_message(chat_id: int):
     wheel_url = f"{WEBAPP_URL}/wheel?cid={chat_id}&v=4_2_2"
