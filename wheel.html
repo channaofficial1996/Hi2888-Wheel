@@ -250,7 +250,7 @@
     const cidFromUrl = params.get("cid");
 
     // ⭐⭐⭐ LIMIT SPIN / DAY (កំណត់នៅទីនេះ)
-    const SPINS_PER_DAY = 1; // ⬅⬅⬅ កែលេខនេះដើម្បីកំណត់ចំនួន spin / 1ថ្ងៃ / 1 user
+    const SPINS_PER_DAY = 10; // ⬅⬅⬅ កែលេខនេះដើម្បីកំណត់ចំនួន spin / 1ថ្ងៃ / 1 user
 
     function getUserId() {
       const webUser = tg && tg.initDataUnsafe ? tg.initDataUnsafe.user : null;
